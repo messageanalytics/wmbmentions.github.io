@@ -1,0 +1,62 @@
+name: Update Transcripts
+
+on:
+  schedule:
+    # Run at minute 0 past every 4th hour
+    - cron: '0 */4 * * *'
+  
+  # UPDATED: Allow manual trigger with inputs for specific videos/channels
+  workflow_dispatch:
+    inputs:
+      manual_urls:
+        description: 'Specific YouTube Video URLs (space separated)'
+        required: false
+        type: string
+      manual_channel:
+        description: 'Override Channel URL to Scrape'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  update-sermons:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run update script
+      # UPDATED: Check for manual inputs or run default schedule
+      run: |
+        if [ "${{ inputs.manual_urls }}" != "" ]; then
+          echo "Running Manual Video Import..."
+          python update_sermons.py --urls ${{ inputs.manual_urls }}
+        elif [ "${{ inputs.manual_channel }}" != "" ]; then
+          echo "Running Manual Channel Scrape..."
+          python update_sermons.py --channel ${{ inputs.manual_channel }} --limit 50
+        else
+          echo "Running Scheduled Update..."
+          python update_sermons.py
+        fi
+
+    - name: Commit and push if changes
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        # UPDATED: Add everything in the data folder (supports multiple churches)
+        git add data/
+        # Only commit if there are actual changes to push
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update transcripts" && git push)
