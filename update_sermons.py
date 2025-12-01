@@ -26,6 +26,7 @@ def get_existing_video_ids(filepath):
         return set()
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
+    # Matches: youtube.com/watch?v=ID
     ids = set(re.findall(r'youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})', content))
     return ids
 
