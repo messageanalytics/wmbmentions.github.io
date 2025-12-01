@@ -4,18 +4,8 @@ on:
   schedule:
     # Run at minute 0 past every 4th hour
     - cron: '0 */4 * * *'
-  
-  # UPDATED: Allow manual trigger with inputs for specific videos/channels
-  workflow_dispatch:
-    inputs:
-      manual_urls:
-        description: 'Specific YouTube Video URLs (space separated)'
-        required: false
-        type: string
-      manual_channel:
-        description: 'Override Channel URL to Scrape'
-        required: false
-        type: string
+   # Manual trigger allowed (no inputs required)
+  workflow_dispatch: 
 
 permissions:
   contents: write
@@ -39,18 +29,7 @@ jobs:
         pip install -r requirements.txt
 
     - name: Run update script
-      # UPDATED: Check for manual inputs or run default schedule
-      run: |
-        if [ "${{ inputs.manual_urls }}" != "" ]; then
-          echo "Running Manual Video Import..."
-          python update_sermons.py --urls ${{ inputs.manual_urls }}
-        elif [ "${{ inputs.manual_channel }}" != "" ]; then
-          echo "Running Manual Channel Scrape..."
-          python update_sermons.py --channel ${{ inputs.manual_channel }} --limit 50
-        else
-          echo "Running Scheduled Update..."
-          python update_sermons.py
-        fi
+      run: python update_sermons.py
 
     - name: Commit and push if changes
       run: |
