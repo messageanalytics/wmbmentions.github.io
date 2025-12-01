@@ -4,8 +4,8 @@ import json
 import datetime
 import argparse
 import scrapetube
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
+from pytubefix import YouTube
+from pytubefix.cli import on_progress
 
 # --- CONFIGURATION ---
 CONFIG_FILES = ["channels.json", "config.json"]
@@ -54,22 +54,49 @@ URL:     https://www.youtube.com/watch?v={video_id}
 
 def get_transcript_text(video_id):
     """
-    Fetches transcript using standard API.
+    Fetches transcript using pytubefix.
     """
-    formatter = TextFormatter()
-    
+    url = f"https://www.youtube.com/watch?v={video_id}"
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        try:
-            transcript = transcript_list.find_manually_created_transcript(['en'])
-        except:
-            try:
-                transcript = transcript_list.find_generated_transcript(['en'])
-            except:
-                transcript = transcript_list.find_transcript(['en']) 
+        yt = YouTube(url, on_progress_callback=on_progress)
         
-        return formatter.format_transcript(transcript.fetch())
+        # pytubefix captions are often in XML format, but let's try to get the text
+        # We prioritize English ('en') or auto-generated English ('a.en')
+        caption = yt.captions.get_by_language_code('en')
+        if not caption:
+            caption = yt.captions.get_by_language_code('a.en')
+            
+        if not caption:
+            # Fallback: Try to find any english-ish code
+            for code in yt.captions:
+                if 'en' in code.code:
+                    caption = code
+                    break
         
+        if not caption:
+            raise Exception("No English captions found.")
+
+        # Convert to text. generate_srt_captions gives timestamps, we want plain text.
+        # We can parse the SRT or XML. Pytubefix often returns XML by default for .xml_captions
+        # But .generate_srt_captions() is standard.
+        # Let's use a simple regex to strip timestamps from SRT for now.
+        srt_text = caption.generate_srt_captions()
+        
+        # Clean SRT to plain text
+        lines = srt_text.splitlines()
+        clean_lines = []
+        for line in lines:
+            # Skip timeline lines (e.g. 00:00:01,000 --> 00:00:04,000)
+            if '-->' in line: continue
+            # Skip numeric sequence lines
+            if line.strip().isdigit(): continue
+            # Skip empty lines
+            if not line.strip(): continue
+            
+            clean_lines.append(line.strip())
+            
+        return " ".join(clean_lines)
+
     except Exception as e:
         raise e
 
@@ -83,30 +110,27 @@ def process_channel(church_name, config, limit=10):
     print(f"Processing Channel: {church_name}")
     
     base_channel_url = channel_url.split('/streams')[0].split('/videos')[0].split('/featured')[0]
-    print(f"Base URL: {base_channel_url}")
-
+    
     existing_ids = get_existing_video_ids(filepath)
     print(f"Found {len(existing_ids)} existing videos.")
 
     all_videos = []
     
-    # Check STREAMS
+    # Scan Streams
     try:
         print("Scanning 'streams'...")
         streams = list(scrapetube.get_channel(channel_url=base_channel_url, content_type='streams', limit=limit))
         print(f"Found {len(streams)} streams.")
         all_videos.extend(streams)
-    except Exception as e:
-        print(f"Stream scan error: {e}")
+    except: pass
 
-    # Check VIDEOS
+    # Scan Videos
     try:
         print("Scanning 'videos'...")
         uploads = list(scrapetube.get_channel(channel_url=base_channel_url, content_type='videos', limit=limit))
         print(f"Found {len(uploads)} videos.")
         all_videos.extend(uploads)
-    except Exception as e:
-        print(f"Video scan error: {e}")
+    except: pass
 
     unique_videos = {v['videoId']: v for v in all_videos}.values()
     
@@ -150,7 +174,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--limit', type=int, default=10)
     args = parser.parse_args()
-    
+
     channels = load_config()
     if not channels: return
 
