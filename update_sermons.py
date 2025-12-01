@@ -25,6 +25,7 @@ def get_existing_video_ids(filepath):
         return set()
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
+    # Matches: youtube.com/watch?v=ID
     ids = set(re.findall(r'youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})', content))
     return ids
 
@@ -58,41 +59,46 @@ def get_transcript_text(video_id):
     """
     url = f"https://www.youtube.com/watch?v={video_id}"
     try:
-        yt = YouTube(url, on_progress_callback=on_progress)
+        # Initialize YouTube object
+        # use_oauth=False helps avoid login prompts in headless mode
+        yt = YouTube(url, use_oauth=False, allow_oauth_cache=False, on_progress_callback=on_progress)
         
-        # pytubefix captions are often in XML format, but let's try to get the text
-        # We prioritize English ('en') or auto-generated English ('a.en')
-        caption = yt.captions.get_by_language_code('en')
-        if not caption:
-            caption = yt.captions.get_by_language_code('a.en')
+        # 1. Try standard English captions
+        caption = None
+        try:
+            caption = yt.captions['en']
+        except:
+            pass
             
+        # 2. Try auto-generated English ('a.en')
         if not caption:
-            # Fallback: Try to find any english-ish code
+            try:
+                caption = yt.captions['a.en']
+            except:
+                pass
+        
+        # 3. Fallback: Search for any code containing 'en'
+        if not caption:
             for code in yt.captions:
                 if 'en' in code.code:
                     caption = code
                     break
         
         if not caption:
-            raise Exception("No English captions found.")
+            # List available codes for debugging
+            available = [c.code for c in yt.captions]
+            raise Exception(f"No English captions found. Available: {available}")
 
-        # Convert to text. generate_srt_captions gives timestamps, we want plain text.
-        # We can parse the SRT or XML. Pytubefix often returns XML by default for .xml_captions
-        # But .generate_srt_captions() is standard.
-        # Let's use a simple regex to strip timestamps from SRT for now.
+        # Generate SRT (Timed Text)
         srt_text = caption.generate_srt_captions()
         
-        # Clean SRT to plain text
+        # Clean SRT to plain text (remove timestamps and line numbers)
         lines = srt_text.splitlines()
         clean_lines = []
         for line in lines:
-            # Skip timeline lines (e.g. 00:00:01,000 --> 00:00:04,000)
-            if '-->' in line: continue
-            # Skip numeric sequence lines
-            if line.strip().isdigit(): continue
-            # Skip empty lines
-            if not line.strip(): continue
-            
+            if '-->' in line: continue      # Skip timestamps
+            if line.strip().isdigit(): continue # Skip sequence numbers
+            if not line.strip(): continue       # Skip empty lines
             clean_lines.append(line.strip())
             
         return " ".join(clean_lines)
@@ -104,19 +110,21 @@ def process_channel(church_name, config, limit=10):
     channel_url = config['url']
     filename = config['filename']
     filepath = os.path.join(DATA_DIR, filename)
+    
     os.makedirs(DATA_DIR, exist_ok=True)
 
     print(f"\n--------------------------------------------------")
     print(f"Processing Channel: {church_name}")
     
+    # Remove sub-paths to ensure we scan the root channel
     base_channel_url = channel_url.split('/streams')[0].split('/videos')[0].split('/featured')[0]
     
     existing_ids = get_existing_video_ids(filepath)
-    print(f"Found {len(existing_ids)} existing videos.")
+    print(f"Found {len(existing_ids)} existing videos in database.")
 
     all_videos = []
     
-    # Scan Streams
+    # Scan Streams tab
     try:
         print("Scanning 'streams'...")
         streams = list(scrapetube.get_channel(channel_url=base_channel_url, content_type='streams', limit=limit))
@@ -124,7 +132,7 @@ def process_channel(church_name, config, limit=10):
         all_videos.extend(streams)
     except: pass
 
-    # Scan Videos
+    # Scan Videos tab
     try:
         print("Scanning 'videos'...")
         uploads = list(scrapetube.get_channel(channel_url=base_channel_url, content_type='videos', limit=limit))
@@ -132,10 +140,11 @@ def process_channel(church_name, config, limit=10):
         all_videos.extend(uploads)
     except: pass
 
+    # Deduplicate
     unique_videos = {v['videoId']: v for v in all_videos}.values()
     
     if not unique_videos:
-        print(f"⚠️ No videos found for {church_name}.")
+        print(f"⚠️ No videos found for {church_name}. Check URL.")
         return
 
     print(f"Total unique videos to check: {len(unique_videos)}")
@@ -158,6 +167,7 @@ def process_channel(church_name, config, limit=10):
             entry = format_sermon_entry(video_id, title, fallback_date, text_formatted, church_name)
             new_entries.append(entry)
             print(f"✅ Transcript downloaded.")
+            
         except Exception as e:
             print(f"❌ Skipping {video_id}: {str(e)}")
 
