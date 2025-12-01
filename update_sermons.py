@@ -56,7 +56,7 @@ URL:     https://www.youtube.com/watch?v={video_id}
     return header + transcript_text + "\n"
 
 def process_channel(church_name, config, limit=10):
-    channel_url = config['url']
+    raw_url = config['url']
     filename = config['filename']
     filepath = os.path.join(DATA_DIR, filename)
     
@@ -65,43 +65,46 @@ def process_channel(church_name, config, limit=10):
 
     print(f"\n--------------------------------------------------")
     print(f"Processing Channel: {church_name}")
-    print(f"URL: {channel_url}")
-    print(f"Target File: {filepath}")
+    
+    # Clean URL to get base channel URL (remove /streams, /videos, /featured)
+    base_channel_url = raw_url.split('/streams')[0].split('/videos')[0].split('/featured')[0]
+    print(f"Base URL: {base_channel_url}")
 
     existing_ids = get_existing_video_ids(filepath)
     print(f"Found {len(existing_ids)} existing videos in database.")
 
-    # 1. Try fetching based on URL type first
-    c_type = 'streams' if '/streams' in channel_url else 'videos'
-    print(f"Attempting to scrape '{c_type}'...")
+    # Collect videos from BOTH 'streams' and 'videos' tabs
+    all_videos = []
     
+    print(f"Scanning 'streams' tab...")
     try:
-        videos = list(scrapetube.get_channel(channel_url=channel_url, content_type=c_type, limit=limit))
+        streams = list(scrapetube.get_channel(channel_url=base_channel_url, content_type='streams', limit=limit))
+        print(f"Found {len(streams)} streams.")
+        all_videos.extend(streams)
     except Exception as e:
-        print(f"Error scraping {c_type}: {e}")
-        videos = []
+        print(f"Error fetching streams: {e}")
 
-    # 2. Fallback: If 0 videos found, try the OTHER type
-    if not videos:
-        fallback_type = 'videos' if c_type == 'streams' else 'streams'
-        print(f"No videos found in '{c_type}'. Trying '{fallback_type}'...")
-        # Remove specific path for fallback check
-        base_url = channel_url.replace('/streams', '').replace('/videos', '')
-        try:
-            videos = list(scrapetube.get_channel(channel_url=base_url, content_type=fallback_type, limit=limit))
-        except Exception as e:
-            print(f"Error scraping {fallback_type}: {e}")
+    print(f"Scanning 'videos' tab...")
+    try:
+        uploads = list(scrapetube.get_channel(channel_url=base_channel_url, content_type='videos', limit=limit))
+        print(f"Found {len(uploads)} videos.")
+        all_videos.extend(uploads)
+    except Exception as e:
+        print(f"Error fetching videos: {e}")
 
-    if not videos:
-        print(f"No videos found for {church_name} (checked both streams and uploads). Check URL.")
+    # Deduplicate by videoId (just in case)
+    unique_videos = {v['videoId']: v for v in all_videos}.values()
+    
+    if not unique_videos:
+        print(f"No videos found for {church_name}. Check URL or channel privacy.")
         return
 
-    print(f"Scrapetube found {len(videos)} videos. Checking for new content...")
+    print(f"Total unique videos to check: {len(unique_videos)}")
     
     new_entries = []
     fallback_date = datetime.datetime.now().strftime("%Y-%m-%d")
 
-    for video in videos:
+    for video in unique_videos:
         video_id = video['videoId']
         
         # Safely extract title
@@ -114,7 +117,7 @@ def process_channel(church_name, config, limit=10):
             # print(f"Skipping existing: {title}") # Uncomment for verbose logs
             continue
 
-        print(f"NEW SERMON FOUND: {title} ({video_id})")
+        print(f"NEW CONTENT FOUND: {title} ({video_id})")
 
         try:
             # Fetch Transcript
@@ -135,7 +138,7 @@ def process_channel(church_name, config, limit=10):
             print(f"Transcript downloaded successfully.")
             
         except Exception as e:
-            print(f" Skipping {video_id} (No transcript/Error): {e}")
+            print(f"Skipping {video_id} (No transcript/Error): {e}")
 
     if new_entries:
         print(f"Writing {len(new_entries)} new sermons to {filepath}...")
