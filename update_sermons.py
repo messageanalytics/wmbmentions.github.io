@@ -4,7 +4,6 @@ import json
 import datetime
 import argparse
 import scrapetube
-import youtube_transcript_api
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 
@@ -55,51 +54,43 @@ URL:     https://www.youtube.com/watch?v={video_id}
 
 def get_transcript_text(video_id):
     """
-    Fetches transcript using standard API for version 0.6.2
+    Fetches transcript using standard API.
     """
     formatter = TextFormatter()
     
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        # Prioritize English
         try:
             transcript = transcript_list.find_manually_created_transcript(['en'])
         except:
             try:
                 transcript = transcript_list.find_generated_transcript(['en'])
             except:
-                # If no English, grab the first available (e.g. auto-translated or original)
-                # This is a permissive fallback
                 transcript = transcript_list.find_transcript(['en']) 
         
         return formatter.format_transcript(transcript.fetch())
         
     except Exception as e:
-        # Re-raise exception to be handled by the caller's logging
         raise e
 
 def process_channel(church_name, config, limit=10):
     channel_url = config['url']
     filename = config['filename']
     filepath = os.path.join(DATA_DIR, filename)
-    
-    # Ensure data directory exists
     os.makedirs(DATA_DIR, exist_ok=True)
 
     print(f"\n--------------------------------------------------")
     print(f"Processing Channel: {church_name}")
     
-    # URL Parsing
     base_channel_url = channel_url.split('/streams')[0].split('/videos')[0].split('/featured')[0]
     print(f"Base URL: {base_channel_url}")
 
     existing_ids = get_existing_video_ids(filepath)
-    print(f"Found {len(existing_ids)} existing videos in database.")
+    print(f"Found {len(existing_ids)} existing videos.")
 
     all_videos = []
     
-    # Scan Streams
+    # Check STREAMS
     try:
         print("Scanning 'streams'...")
         streams = list(scrapetube.get_channel(channel_url=base_channel_url, content_type='streams', limit=limit))
@@ -108,7 +99,7 @@ def process_channel(church_name, config, limit=10):
     except Exception as e:
         print(f"Stream scan error: {e}")
 
-    # Scan Videos
+    # Check VIDEOS
     try:
         print("Scanning 'videos'...")
         uploads = list(scrapetube.get_channel(channel_url=base_channel_url, content_type='videos', limit=limit))
@@ -144,7 +135,6 @@ def process_channel(church_name, config, limit=10):
             new_entries.append(entry)
             print(f"✅ Transcript downloaded.")
         except Exception as e:
-            # This captures errors like "Transcripts Disabled" or API failures
             print(f"❌ Skipping {video_id}: {str(e)}")
 
     if new_entries:
@@ -160,8 +150,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--limit', type=int, default=10)
     args = parser.parse_args()
-
-    print(f"YOUTUBE TRANSCRIPT API VERSION: {youtube_transcript_api.__version__}")
     
     channels = load_config()
     if not channels: return
