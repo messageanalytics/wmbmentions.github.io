@@ -32,7 +32,7 @@
         const { useState, useEffect, useMemo, useRef } = React;
         const { 
             ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-            ResponsiveContainer, Brush, BarChart, Area, Cell, LineChart 
+            ResponsiveContainer, Brush, BarChart, LineChart 
         } = Recharts;
 
         // --- CONFIGURATION ---
@@ -47,7 +47,6 @@
             { name: "Evening Light Fellowship", url: "https://www.youtube.com/@eveninglightfellowshipaz" }
         ];
 
-        // Specific colors for consistent church mapping
         const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#be123c", "#4f46e5"];
         const getColor = (index) => COLORS[index % COLORS.length];
 
@@ -61,10 +60,11 @@
                 barChart: <path d="M18 20V10M12 20V4M6 20v-6" />,
                 fileText: <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />,
                 users: <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />,
-                calendar: <path d="M8 2v4m8-4v4m-12 4h16m-16 4h16m-16 4h16" />,
                 chevronDown: <path d="m6 9 6 6 6-6" />,
                 info: <path d="M12 16v-4m0-4h.01M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10Z" />,
-                lineChart: <path d="M3 3v18h18" />
+                lineChart: <path d="M3 3v18h18" />,
+                eye: <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />,
+                alignLeft: <path d="M21 6H3m18 6H3m18 6H3" />
             };
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -92,39 +92,23 @@
                 else onChange([...selected, opt]);
             };
 
-            const selectAll = () => onChange(options);
-            const clearAll = () => onChange([]);
-
             return (
                 <div className="relative" ref={ref}>
                     <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1 block">{label}</label>
-                    <button 
-                        onClick={() => setIsOpen(!isOpen)}
-                        className="w-full bg-white border border-gray-300 text-left text-sm text-gray-700 rounded-lg p-2.5 shadow-sm flex justify-between items-center hover:border-blue-400 transition"
-                    >
-                        <span className="truncate">
-                            {selected.length === 0 ? "Select..." : 
-                             selected.length === options.length ? "All Selected" : 
-                             `${selected.length} Selected`}
-                        </span>
+                    <button onClick={() => setIsOpen(!isOpen)} className="w-full bg-white border border-gray-300 text-left text-sm text-gray-700 rounded-lg p-2.5 shadow-sm flex justify-between items-center hover:border-blue-400 transition">
+                        <span className="truncate">{selected.length === 0 ? "Select..." : selected.length === options.length ? "All Selected" : `${selected.length} Selected`}</span>
                         <Icon name="chevronDown" size={14} className="text-gray-400" />
                     </button>
-                    
                     {isOpen && (
                         <div className="absolute top-full left-0 w-full mt-1 bg-white border border-gray-200 shadow-xl rounded-lg z-50 max-h-60 flex flex-col">
                             <div className="p-2 border-b flex justify-between bg-gray-50 rounded-t-lg">
-                                <button onClick={selectAll} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Select All</button>
-                                <button onClick={clearAll} className="text-xs text-red-500 hover:text-red-700 font-medium">Clear</button>
+                                <button onClick={() => onChange(options)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Select All</button>
+                                <button onClick={() => onChange([])} className="text-xs text-red-500 hover:text-red-700 font-medium">Clear</button>
                             </div>
                             <div className="overflow-y-auto p-1 custom-scrollbar">
                                 {options.map(opt => (
                                     <label key={opt} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={selected.includes(opt)}
-                                            onChange={() => toggleOption(opt)}
-                                            className="rounded text-blue-600 focus:ring-blue-500" 
-                                        />
+                                        <input type="checkbox" checked={selected.includes(opt)} onChange={() => toggleOption(opt)} className="rounded text-blue-600 focus:ring-blue-500" />
                                         <span className="text-sm text-gray-700 truncate">{opt}</span>
                                     </label>
                                 ))}
@@ -148,56 +132,120 @@
             </div>
         );
 
+        // --- IMPROVED MODAL WITH SNIPPETS ---
         const SermonModal = ({ sermon, onClose }) => {
-            const [fullText, setFullText] = useState("Loading transcript...");
-            const contentRef = useRef(null);
-            
+            const [fullText, setFullText] = useState("");
+            const [isLoading, setIsLoading] = useState(true);
+            const [viewMode, setViewMode] = useState("snippets"); // 'snippets' or 'full'
+            const [snippets, setSnippets] = useState([]);
+
             useEffect(() => {
                 fetch(sermon.path)
-                    .then(res => {
-                        if (!res.ok) return "Transcript text not found on server. Ensure 'data' folder is uploaded.";
-                        return res.text();
+                    .then(res => res.ok ? res.text() : "Transcript not available.")
+                    .then(text => {
+                        setFullText(text);
+                        setIsLoading(false);
+                        
+                        // Generate Snippets
+                        const term = sermon.searchTerm || "William Branham|Brother Branham";
+                        const regex = new RegExp(`(${term})`, 'gi');
+                        const matches = [];
+                        let match;
+                        while ((match = regex.exec(text)) !== null) {
+                            const start = Math.max(0, match.index - 150);
+                            const end = Math.min(text.length, match.index + match[0].length + 150);
+                            matches.push(text.substring(start, end));
+                        }
+                        setSnippets(matches);
+                        
+                        // If no matches, default to full text
+                        if (matches.length === 0) setViewMode("full");
                     })
-                    .then(setFullText)
-                    .catch(err => setFullText("Error loading transcript."));
+                    .catch(() => {
+                        setFullText("Error loading transcript.");
+                        setIsLoading(false);
+                    });
             }, [sermon]);
 
-            useEffect(() => {
-                if (fullText && sermon.searchTerm && contentRef.current) {
-                    setTimeout(() => {
-                        const match = contentRef.current.querySelector('.highlight-match');
-                        if (match) match.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 500);
-                }
-            }, [fullText, sermon.searchTerm]);
-
             const highlight = (text, term) => {
-                if (!term) return text;
-                const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+                const regex = new RegExp(`(${term || "William Branham|Brother Branham"})`, 'gi');
                 const parts = text.split(regex);
                 return parts.map((part, i) => 
                     regex.test(part) ? <span key={i} className="highlight-match">{part}</span> : part
                 );
             };
 
+            const downloadText = () => {
+                const a = document.createElement('a');
+                a.href = sermon.path;
+                a.download = `${sermon.date} - ${sermon.title}.txt`;
+                a.click();
+            };
+
             return (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                        {/* Header */}
                         <div className="p-5 border-b bg-gray-50 flex justify-between items-start">
-                            <div>
+                            <div className="flex-1 pr-4">
                                 <h2 className="text-xl font-bold text-gray-900 line-clamp-1">{sermon.title}</h2>
                                 <div className="flex flex-wrap gap-2 mt-2 text-sm text-gray-600">
-                                    <span className="bg-white border px-2 py-0.5 rounded shadow-sm">{sermon.church}</span>
-                                    <span className="bg-white border px-2 py-0.5 rounded shadow-sm">{sermon.date}</span>
-                                    {sermon.searchTerm && <span className="bg-yellow-100 text-yellow-800 border border-yellow-200 px-2 py-0.5 rounded font-medium">Found: "{sermon.searchTerm}"</span>}
+                                    <span className="bg-white border px-2 py-0.5 rounded">{sermon.church}</span>
+                                    <span className="bg-white border px-2 py-0.5 rounded">{sermon.date}</span>
+                                    <span className="bg-white border px-2 py-0.5 rounded">{sermon.speaker}</span>
+                                    <span className="bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 rounded font-bold">{sermon.mentionCount} Mentions</span>
                                 </div>
                             </div>
-                            <button onClick={onClose} className="p-2 hover:bg-red-100 text-gray-400 hover:text-red-600 rounded-full transition"><Icon name="x" /></button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-8 bg-white" ref={contentRef}>
-                            <div className="max-w-3xl mx-auto whitespace-pre-wrap font-serif text-gray-800 leading-relaxed text-base">
-                                {sermon.searchTerm ? highlight(fullText, sermon.searchTerm) : fullText}
+                            <div className="flex gap-2">
+                                <button onClick={downloadText} className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition" title="Download">
+                                    <Icon name="download" />
+                                </button>
+                                <button onClick={onClose} className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition">
+                                    <Icon name="x" />
+                                </button>
                             </div>
+                        </div>
+
+                        {/* Toolbar */}
+                        <div className="px-6 py-3 border-b flex gap-4 bg-white shadow-sm z-10">
+                            <button 
+                                onClick={() => setViewMode("snippets")}
+                                className={`flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-md transition ${viewMode === 'snippets' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                                disabled={snippets.length === 0}
+                            >
+                                <Icon name="eye" size={16} /> Mentions ({snippets.length})
+                            </button>
+                            <button 
+                                onClick={() => setViewMode("full")}
+                                className={`flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-md transition ${viewMode === 'full' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                            >
+                                <Icon name="alignLeft" size={16} /> Full Transcript
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto p-8 bg-white font-serif text-gray-800 leading-relaxed text-base">
+                            {isLoading ? (
+                                <p className="text-center text-gray-400 italic">Loading content...</p>
+                            ) : viewMode === 'snippets' ? (
+                                <div className="max-w-3xl mx-auto space-y-6">
+                                    {snippets.length > 0 ? snippets.map((snip, i) => (
+                                        <div key={i} className="bg-gray-50 p-4 rounded-lg border-l-4 border-yellow-400 shadow-sm">
+                                            <p className="text-gray-400 text-xs font-sans font-bold mb-2 uppercase tracking-wide">Mention #{i+1}</p>
+                                            <p>...{highlight(snip, sermon.searchTerm)}...</p>
+                                        </div>
+                                    )) : (
+                                        <div className="text-center py-10 text-gray-400">
+                                            <p>No direct mentions found in search context.</p>
+                                            <button onClick={() => setViewMode("full")} className="text-blue-500 underline mt-2">View full transcript</button>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="max-w-3xl mx-auto whitespace-pre-wrap">
+                                    {highlight(fullText, sermon.searchTerm)}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -211,31 +259,28 @@
             const [apiPrefix, setApiPrefix] = useState("site_api/");
             const [totalChunks, setTotalChunks] = useState(0);
 
-            // --- FILTERS STATE ---
+            // FILTERS
             const [selChurches, setSelChurches] = useState([]);
             const [selSpeakers, setSelSpeakers] = useState([]);
             const [selYears, setSelYears] = useState([]);
             const [selTypes, setSelTypes] = useState([]);
-            const [selLangs, setSelLangs] = useState([]);
+            const [selLangs, setSelLangs] = useState([]); // Default will be set in useEffect
             
-            // --- SETTINGS STATE ---
+            // SETTINGS
             const [rollingDays, setRollingDays] = useState(30);
-            const [view, setView] = useState("dashboard"); // dashboard, search, data
+            const [view, setView] = useState("dashboard");
             
-            // --- SEARCH STATE ---
+            // SEARCH & MODAL
             const [searchQuery, setSearchQuery] = useState("");
             const [searchResults, setSearchResults] = useState([]);
             const [isSearching, setIsSearching] = useState(false);
             const [searchProgress, setSearchProgress] = useState("");
-
-            // --- MODAL STATE ---
             const [selectedSermon, setSelectedSermon] = useState(null);
             
-            // --- DOWNLOAD STATE ---
+            // DOWNLOAD
             const [isZipping, setIsZipping] = useState(false);
             const [zipProgress, setZipProgress] = useState("");
 
-            // 1. INITIAL LOAD
             useEffect(() => {
                 const init = async () => {
                     try {
@@ -248,33 +293,29 @@
                         if (!res.ok) throw new Error("Metadata not found.");
                         
                         const json = await res.json();
-                        const list = (json.sermons || []).map(s => ({
-                            ...s,
-                            dateObj: new Date(s.timestamp),
-                            path: s.path 
-                        }));
+                        const list = (json.sermons || []).map(s => ({ ...s, dateObj: new Date(s.timestamp), path: s.path }));
                         
                         setRawData(list);
                         setTotalChunks(json.totalChunks || 0);
                         setApiPrefix(prefix);
 
-                        // Init Filters (Select All)
+                        // Init Filters
                         setSelChurches([...new Set(list.map(s => s.church))]);
                         setSelSpeakers([...new Set(list.map(s => s.speaker))]);
                         setSelYears([...new Set(list.map(s => s.year))]);
                         setSelTypes([...new Set(list.map(s => s.type))]);
-                        setSelLangs([...new Set(list.map(s => s.language))]);
+                        
+                        // Default to English if available, otherwise select all
+                        const langs = [...new Set(list.map(s => s.language))];
+                        if (langs.includes("English")) setSelLangs(["English"]);
+                        else setSelLangs(langs);
                         
                         setLoading(false);
-                    } catch (e) {
-                        setError(e.message);
-                        setLoading(false);
-                    }
+                    } catch (e) { setError(e.message); setLoading(false); }
                 };
                 init();
             }, []);
 
-            // 2. FILTER LOGIC
             const options = useMemo(() => {
                 const getUnique = (k) => [...new Set(rawData.map(s => s[k]))].filter(Boolean).sort();
                 return {
@@ -296,7 +337,6 @@
                 );
             }, [rawData, selChurches, selSpeakers, selYears, selTypes, selLangs]);
 
-            // 3. STATS
             const stats = useMemo(() => {
                 if (!filteredData.length) return null;
                 const total = filteredData.length;
@@ -313,11 +353,9 @@
                 };
             }, [filteredData]);
 
-            // 4. CHART DATA: COMBINED TREND (BARS) & ROLLING AVG (LINE)
             const trendData = useMemo(() => {
                 if (!filteredData.length) return [];
                 const sorted = [...filteredData].sort((a,b) => a.timestamp - b.timestamp);
-                
                 return sorted.map((item, index, arr) => {
                     const cutoff = item.timestamp - (rollingDays * 24 * 60 * 60 * 1000);
                     let sum = 0, count = 0;
@@ -326,25 +364,16 @@
                         sum += arr[i].mentionCount;
                         count++;
                     }
-                    return {
-                        ...item,
-                        rollingAvg: count > 0 ? parseFloat((sum / count).toFixed(1)) : 0
-                    };
+                    return { ...item, rollingAvg: count > 0 ? parseFloat((sum / count).toFixed(1)) : 0 };
                 });
             }, [filteredData, rollingDays]);
 
-            // 5. CHART DATA: CHURCH COMPARISON (ROLLING LINES)
             const comparisonData = useMemo(() => {
                 if (!filteredData.length) return [];
-                
-                // Group sermons by church
                 const grouped = {};
                 selChurches.forEach(c => grouped[c] = []);
-                filteredData.forEach(s => {
-                    if (grouped[s.church]) grouped[s.church].push(s);
-                });
+                filteredData.forEach(s => { if (grouped[s.church]) grouped[s.church].push(s); });
 
-                // Calculate rolling avgs for each church separately
                 const points = [];
                 Object.keys(grouped).forEach(church => {
                     const sermons = grouped[church].sort((a,b) => a.timestamp - b.timestamp);
@@ -361,18 +390,15 @@
                         points.push(point);
                     });
                 });
-                
                 return points.sort((a,b) => a.timestamp - b.timestamp);
             }, [filteredData, rollingDays, selChurches]);
 
-            // 6. CHART DATA: YEARLY SILENCE
             const yearlyStats = useMemo(() => {
                 const map = {};
                 filteredData.forEach(s => {
                     if (!map[s.year]) map[s.year] = { year: s.year, total: 0, zero: 0, has: 0 };
                     map[s.year].total++;
-                    if (s.mentionCount === 0) map[s.year].zero++;
-                    else map[s.year].has++;
+                    if (s.mentionCount === 0) map[s.year].zero++; else map[s.year].has++;
                 });
                 return Object.values(map).sort((a,b) => b.year - a.year).map(y => ({
                     ...y,
@@ -381,19 +407,15 @@
                 })).reverse();
             }, [filteredData]);
 
-            // 7. DOWNLOAD HANDLER (Advanced)
             const handleCustomDownload = async () => {
                 setIsZipping(true);
                 setZipProgress("Initializing...");
                 const zip = new JSZip();
                 const folder = zip.folder("Filtered_Sermons");
-                
                 try {
                     const neededIds = new Set(filteredData.map(s => s.id));
-                    let processed = 0;
-
                     for(let i=0; i<totalChunks; i++) {
-                        setZipProgress(`Processing Database Chunk ${i+1}/${totalChunks}...`);
+                        setZipProgress(`Scanning chunk ${i+1}/${totalChunks}...`);
                         const res = await fetch(`${apiPrefix}text_chunk_${i}.json`);
                         if(res.ok) {
                             const chunk = await res.json();
@@ -403,29 +425,18 @@
                                     if(meta) {
                                         const cleanTitle = `${meta.date} - ${meta.church} - ${meta.title}`.replace(/[^a-z0-9 \-\.]/gi, '_');
                                         folder.file(`${cleanTitle}.txt`, item.text);
-                                        processed++;
                                     }
                                 }
                             });
                         }
                     }
-                    
-                    setZipProgress("Compressing files...");
+                    setZipProgress("Compressing...");
                     const content = await zip.generateAsync({type:"blob"});
                     const url = window.URL.createObjectURL(content);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `Custom_Sermon_Export_${new Date().toISOString().split('T')[0]}.zip`;
-                    a.click();
-                    
-                } catch(e) {
-                    alert("Download failed: " + e.message);
-                } finally {
-                    setIsZipping(false);
-                }
+                    const a = document.createElement('a'); a.href = url; a.download = `Custom_Sermon_Export.zip`; a.click();
+                } catch(e) { alert("Download failed: " + e.message); } finally { setIsZipping(false); }
             };
 
-            // 8. SEARCH HANDLER
             const performSearch = async () => {
                 if (!searchQuery || searchQuery.length < 3) return;
                 setIsSearching(true);
@@ -433,7 +444,6 @@
                 setSearchProgress("Initializing...");
                 const term = searchQuery.toLowerCase();
                 const matches = [];
-                
                 for (let i = 0; i < totalChunks; i++) {
                     setSearchProgress(`Scanning chunk ${i + 1}/${totalChunks}...`);
                     try {
@@ -457,7 +467,6 @@
                 setIsSearching(false);
             };
 
-            // Helpers
             const formatDate = (ts) => new Date(ts).toLocaleDateString();
 
             if (loading) return <div className="h-screen flex items-center justify-center font-medium text-gray-500">Loading Database...</div>;
@@ -465,7 +474,6 @@
 
             return (
                 <div className="min-h-screen pb-20 relative">
-                    {/* TOP BAR */}
                     <div className="bg-white border-b sticky top-0 z-30 shadow-sm">
                         <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
                             <div className="flex items-center gap-3">
@@ -474,36 +482,21 @@
                             </div>
                             <div className="flex bg-gray-100 p-1 rounded-lg">
                                 {['dashboard', 'search', 'data'].map(tab => (
-                                    <button 
-                                        key={tab}
-                                        onClick={() => setView(tab)} 
-                                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition capitalize ${view === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-                                    >
-                                        {tab}
-                                    </button>
+                                    <button key={tab} onClick={() => setView(tab)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition capitalize ${view === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>{tab}</button>
                                 ))}
                             </div>
                         </div>
                     </div>
 
-                    {/* DISCLAIMER BANNER */}
                     <div className="bg-yellow-50 border-b border-yellow-100 text-yellow-800 text-xs text-center py-2 px-4">
                         <span className="font-bold">Disclaimer:</span> This data is based solely on available YouTube automated transcripts and does not represent all sermons preached during this timeframe.
                     </div>
 
                     <main className="max-w-7xl mx-auto px-4 mt-8">
-                        
-                        {/* GLOBAL FILTERS */}
                         <div className="bg-white p-6 rounded-xl border shadow-sm mb-8">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="font-bold text-gray-800 flex items-center gap-2"><Icon name="filter" /> Filter Database</h3>
-                                <button onClick={() => {
-                                    setSelChurches(options.churches);
-                                    setSelSpeakers(options.speakers);
-                                    setSelYears(options.years);
-                                    setSelTypes(options.types);
-                                    setSelLangs(options.langs);
-                                }} className="text-xs text-blue-600 font-medium hover:underline">Reset All</button>
+                                <button onClick={() => { setSelChurches(options.churches); setSelSpeakers(options.speakers); setSelYears(options.years); setSelTypes(options.types); setSelLangs(options.langs); }} className="text-xs text-blue-600 font-medium hover:underline">Reset All</button>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
                                 <MultiSelect label="Churches" options={options.churches} selected={selChurches} onChange={setSelChurches} />
@@ -516,7 +509,6 @@
 
                         {view === 'dashboard' && stats && (
                             <>
-                                {/* KPI CARDS */}
                                 <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
                                     <StatCard title="Total Sermons" value={stats.totalSermons} icon="fileText" color="blue" />
                                     <StatCard title="Total Mentions" value={stats.totalMentions.toLocaleString()} icon="users" color="green" />
@@ -526,16 +518,13 @@
                                     <StatCard title="Zero Rate" value={`${stats.zeroRate}%`} sub="Of Selection" icon="x" color="orange" />
                                 </div>
 
-                                {/* CHART ROW 1: Trends & Yearly */}
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                                     <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm h-[450px]">
                                         <div className="flex justify-between items-center mb-6">
                                             <h3 className="font-bold text-gray-800">Mentions Trend & Rolling Average (Overall)</h3>
                                             <div className="flex bg-gray-100 rounded-lg p-1">
                                                 {[7, 30, 180].map(d => (
-                                                    <button key={d} onClick={() => setRollingDays(d)} className={`px-3 py-1 text-xs font-medium rounded ${rollingDays === d ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>
-                                                        {d === 180 ? '6 Mo' : `${d} Days`}
-                                                    </button>
+                                                    <button key={d} onClick={() => setRollingDays(d)} className={`px-3 py-1 text-xs font-medium rounded ${rollingDays === d ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>{d === 180 ? '6 Mo' : `${d} Days`}</button>
                                                 ))}
                                             </div>
                                         </div>
@@ -551,7 +540,6 @@
                                             </ComposedChart>
                                         </ResponsiveContainer>
                                     </div>
-
                                     <div className="bg-white p-6 rounded-xl border shadow-sm h-[450px]">
                                         <h3 className="font-bold text-gray-800 mb-2">Yearly Consistency</h3>
                                         <p className="text-xs text-gray-500 mb-6">Percentage of sermons with vs. without mentions</p>
@@ -569,7 +557,6 @@
                                     </div>
                                 </div>
 
-                                {/* CHART ROW 2: COMPARATIVE ROLLING AVG */}
                                 <div className="bg-white p-6 rounded-xl border shadow-sm mb-8 h-[500px]">
                                     <div className="flex justify-between items-center mb-6">
                                         <div>
@@ -580,37 +567,19 @@
                                     <ResponsiveContainer width="100%" height="85%">
                                         <LineChart data={comparisonData}>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                            <XAxis 
-                                                dataKey="timestamp" 
-                                                type="number" 
-                                                scale="time" 
-                                                domain={['auto', 'auto']} 
-                                                tickFormatter={formatDate}
-                                                tick={{fontSize: 10}} 
-                                            />
+                                            <XAxis dataKey="timestamp" type="number" scale="time" domain={['auto', 'auto']} tickFormatter={formatDate} tick={{fontSize: 10}} />
                                             <YAxis tick={{fontSize: 10}} label={{ value: 'Avg Mentions', angle: -90, position: 'insideLeft', style: {fontSize: 10} }} />
                                             <Tooltip labelFormatter={formatDate} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'}} />
                                             <Legend wrapperStyle={{fontSize: '11px', paddingTop: '10px'}} />
                                             {selChurches.map((church, i) => (
-                                                <Line 
-                                                    key={church} 
-                                                    type="monotone" 
-                                                    dataKey={church} 
-                                                    stroke={getColor(i)} 
-                                                    strokeWidth={2} 
-                                                    dot={false} 
-                                                    connectNulls={true} 
-                                                />
+                                                <Line key={church} type="monotone" dataKey={church} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} connectNulls={true} />
                                             ))}
                                         </LineChart>
                                     </ResponsiveContainer>
                                 </div>
 
-                                {/* DATA TABLE */}
                                 <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-                                        <h3 className="font-bold text-gray-800">Sermon List ({filteredData.length})</h3>
-                                    </div>
+                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center"><h3 className="font-bold text-gray-800">Sermon List ({filteredData.length})</h3></div>
                                     <div className="overflow-x-auto max-h-[600px]">
                                         <table className="w-full text-sm text-left text-gray-500">
                                             <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10 shadow-sm">
@@ -632,18 +601,7 @@
                                                         <td className="px-6 py-4">{s.speaker}</td>
                                                         <td className={`px-6 py-4 text-right font-bold ${s.mentionCount === 0 ? 'text-red-500' : 'text-blue-600'}`}>{s.mentionCount}</td>
                                                         <td className="px-6 py-4 text-center">
-                                                            <button 
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    const a = document.createElement('a');
-                                                                    a.href = s.path;
-                                                                    a.download = `${s.date} - ${s.title}.txt`;
-                                                                    a.click();
-                                                                }}
-                                                                className="text-gray-400 hover:text-blue-600" title="Download Transcript"
-                                                            >
-                                                                <Icon name="download" size={16} />
-                                                            </button>
+                                                            <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = s.path; a.download = `${s.date} - ${s.title}.txt`; a.click(); }} className="text-gray-400 hover:text-blue-600" title="Download Transcript"><Icon name="download" size={16} /></button>
                                                         </td>
                                                     </tr>
                                                 ))}
@@ -661,17 +619,8 @@
                                     <p className="text-gray-500 mb-6">Searching {filteredData.length} filtered sermons.</p>
                                     <div className="flex gap-2 relative">
                                         <Icon name="search" className="absolute left-4 top-3.5 text-gray-400" />
-                                        <input 
-                                            type="text" 
-                                            className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg shadow-sm"
-                                            placeholder="Search quote, doctrine, or name..."
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                            onKeyDown={(e) => e.key === 'Enter' && performSearch()}
-                                        />
-                                        <button onClick={performSearch} disabled={isSearching} className="bg-blue-600 text-white px-8 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50">
-                                            {isSearching ? "..." : "Search"}
-                                        </button>
+                                        <input type="text" className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg shadow-sm" placeholder="Search quote, doctrine, or name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && performSearch()} />
+                                        <button onClick={performSearch} disabled={isSearching} className="bg-blue-600 text-white px-8 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50">{isSearching ? "..." : "Search"}</button>
                                     </div>
                                     {isSearching && <p className="mt-4 text-blue-600 animate-pulse text-sm">{searchProgress}</p>}
                                 </div>
@@ -697,23 +646,12 @@
                                 <div className="bg-white p-8 rounded-xl border shadow-sm">
                                     <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Icon name="download" /> Download Data</h3>
                                     <p className="text-gray-600 mb-6 text-sm">Download raw transcripts for offline analysis.</p>
-                                    
                                     <div className="space-y-3">
-                                        <a href="all_sermons_archive.zip" download className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition">
-                                            <span>Download Full Archive (All)</span>
-                                        </a>
-                                        
-                                        <button 
-                                            onClick={handleCustomDownload} 
-                                            disabled={isZipping}
-                                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50"
-                                        >
-                                            {isZipping ? <span>{zipProgress}</span> : <span>Download Filtered Zip ({filteredData.length} Files)</span>}
-                                        </button>
+                                        <a href="all_sermons_archive.zip" download className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition"><span>Download Full Archive (All)</span></a>
+                                        <button onClick={handleCustomDownload} disabled={isZipping} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50">{isZipping ? <span>{zipProgress}</span> : <span>Download Filtered Zip ({filteredData.length} Files)</span>}</button>
                                     </div>
                                     <p className="mt-4 text-xs text-gray-400">The "Filtered Zip" generates a new archive containing only the sermons currently shown in your Dashboard.</p>
                                 </div>
-
                                 <div className="bg-white p-8 rounded-xl border shadow-sm">
                                     <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Icon name="info" /> Data Sources</h3>
                                     <p className="text-gray-600 mb-4 text-sm">Data is sourced from the following YouTube channels:</p>
@@ -728,38 +666,9 @@
                                 </div>
                             </div>
                         )}
-
                     </main>
 
-                    {/* MODAL FOR SINGLE TRANSCRIPT */}
-                    {selectedSermon && (
-                        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setSelectedSermon(null)}>
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-                                <div className="p-5 border-b flex justify-between bg-gray-50">
-                                    <div>
-                                        <h2 className="font-bold text-xl">{selectedSermon.title}</h2>
-                                        <p className="text-sm text-gray-500">{selectedSermon.date} • {selectedSermon.speaker}</p>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <button onClick={() => {
-                                            const a = document.createElement('a');
-                                            a.href = selectedSermon.path;
-                                            a.download = `${selectedSermon.date} - ${selectedSermon.title}.txt`;
-                                            a.click();
-                                        }} className="p-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200" title="Download Text">
-                                            <Icon name="download" />
-                                        </button>
-                                        <button onClick={() => setSelectedSermon(null)} className="p-2 bg-red-100 text-red-700 rounded hover:bg-red-200">
-                                            <Icon name="x" />
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="flex-1 overflow-y-auto p-0">
-                                    <SermonModal sermon={selectedSermon} onClose={() => {}} />
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    {selectedSermon && <SermonModal sermon={selectedSermon} onClose={() => setSelectedSermon(null)} />}
                 </div>
             );
         };
