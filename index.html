@@ -32,7 +32,7 @@
         const { useState, useEffect, useMemo, useRef } = React;
         const { 
             ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-            ResponsiveContainer, Brush, BarChart, Area, Cell 
+            ResponsiveContainer, Brush, BarChart, Area, Cell, LineChart 
         } = Recharts;
 
         // --- CONFIGURATION ---
@@ -47,7 +47,9 @@
             { name: "Evening Light Fellowship", url: "https://www.youtube.com/@eveninglightfellowshipaz" }
         ];
 
+        // Specific colors for consistent church mapping
         const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#be123c", "#4f46e5"];
+        const getColor = (index) => COLORS[index % COLORS.length];
 
         // --- ICONS ---
         const Icon = ({ name, size = 18, className = "" }) => {
@@ -61,7 +63,8 @@
                 users: <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />,
                 calendar: <path d="M8 2v4m8-4v4m-12 4h16m-16 4h16m-16 4h16" />,
                 chevronDown: <path d="m6 9 6 6 6-6" />,
-                info: <path d="M12 16v-4m0-4h.01M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10Z" />
+                info: <path d="M12 16v-4m0-4h.01M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10Z" />,
+                lineChart: <path d="M3 3v18h18" />
             };
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -144,6 +147,62 @@
                 </div>
             </div>
         );
+
+        const SermonModal = ({ sermon, onClose }) => {
+            const [fullText, setFullText] = useState("Loading transcript...");
+            const contentRef = useRef(null);
+            
+            useEffect(() => {
+                fetch(sermon.path)
+                    .then(res => {
+                        if (!res.ok) return "Transcript text not found on server. Ensure 'data' folder is uploaded.";
+                        return res.text();
+                    })
+                    .then(setFullText)
+                    .catch(err => setFullText("Error loading transcript."));
+            }, [sermon]);
+
+            useEffect(() => {
+                if (fullText && sermon.searchTerm && contentRef.current) {
+                    setTimeout(() => {
+                        const match = contentRef.current.querySelector('.highlight-match');
+                        if (match) match.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 500);
+                }
+            }, [fullText, sermon.searchTerm]);
+
+            const highlight = (text, term) => {
+                if (!term) return text;
+                const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+                const parts = text.split(regex);
+                return parts.map((part, i) => 
+                    regex.test(part) ? <span key={i} className="highlight-match">{part}</span> : part
+                );
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-5 border-b bg-gray-50 flex justify-between items-start">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900 line-clamp-1">{sermon.title}</h2>
+                                <div className="flex flex-wrap gap-2 mt-2 text-sm text-gray-600">
+                                    <span className="bg-white border px-2 py-0.5 rounded shadow-sm">{sermon.church}</span>
+                                    <span className="bg-white border px-2 py-0.5 rounded shadow-sm">{sermon.date}</span>
+                                    {sermon.searchTerm && <span className="bg-yellow-100 text-yellow-800 border border-yellow-200 px-2 py-0.5 rounded font-medium">Found: "{sermon.searchTerm}"</span>}
+                                </div>
+                            </div>
+                            <button onClick={onClose} className="p-2 hover:bg-red-100 text-gray-400 hover:text-red-600 rounded-full transition"><Icon name="x" /></button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-8 bg-white" ref={contentRef}>
+                            <div className="max-w-3xl mx-auto whitespace-pre-wrap font-serif text-gray-800 leading-relaxed text-base">
+                                {sermon.searchTerm ? highlight(fullText, sermon.searchTerm) : fullText}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
 
         const App = () => {
             const [rawData, setRawData] = useState([]);
@@ -254,25 +313,19 @@
                 };
             }, [filteredData]);
 
-            // 4. CHART DATA: TRENDS & ROLLING AVG
+            // 4. CHART DATA: COMBINED TREND (BARS) & ROLLING AVG (LINE)
             const trendData = useMemo(() => {
                 if (!filteredData.length) return [];
-                
-                // Sort by date first
                 const sorted = [...filteredData].sort((a,b) => a.timestamp - b.timestamp);
                 
                 return sorted.map((item, index, arr) => {
-                    // Calculate Rolling Average
                     const cutoff = item.timestamp - (rollingDays * 24 * 60 * 60 * 1000);
                     let sum = 0, count = 0;
-                    
-                    // Look backwards
                     for (let i = index; i >= 0; i--) {
                         if (arr[i].timestamp < cutoff) break;
                         sum += arr[i].mentionCount;
                         count++;
                     }
-                    
                     return {
                         ...item,
                         rollingAvg: count > 0 ? parseFloat((sum / count).toFixed(1)) : 0
@@ -280,7 +333,39 @@
                 });
             }, [filteredData, rollingDays]);
 
-            // 5. CHART DATA: YEARLY SILENCE
+            // 5. CHART DATA: CHURCH COMPARISON (ROLLING LINES)
+            const comparisonData = useMemo(() => {
+                if (!filteredData.length) return [];
+                
+                // Group sermons by church
+                const grouped = {};
+                selChurches.forEach(c => grouped[c] = []);
+                filteredData.forEach(s => {
+                    if (grouped[s.church]) grouped[s.church].push(s);
+                });
+
+                // Calculate rolling avgs for each church separately
+                const points = [];
+                Object.keys(grouped).forEach(church => {
+                    const sermons = grouped[church].sort((a,b) => a.timestamp - b.timestamp);
+                    sermons.forEach((s, idx) => {
+                        const cutoff = s.timestamp - (rollingDays * 24 * 60 * 60 * 1000);
+                        let sum = 0, count = 0;
+                        for (let i = idx; i >= 0; i--) {
+                            if (sermons[i].timestamp < cutoff) break;
+                            sum += sermons[i].mentionCount;
+                            count++;
+                        }
+                        const point = { timestamp: s.timestamp };
+                        point[church] = parseFloat((sum / count).toFixed(1));
+                        points.push(point);
+                    });
+                });
+                
+                return points.sort((a,b) => a.timestamp - b.timestamp);
+            }, [filteredData, rollingDays, selChurches]);
+
+            // 6. CHART DATA: YEARLY SILENCE
             const yearlyStats = useMemo(() => {
                 const map = {};
                 filteredData.forEach(s => {
@@ -296,7 +381,7 @@
                 })).reverse();
             }, [filteredData]);
 
-            // 6. DOWNLOAD HANDLER (Advanced)
+            // 7. DOWNLOAD HANDLER (Advanced)
             const handleCustomDownload = async () => {
                 setIsZipping(true);
                 setZipProgress("Initializing...");
@@ -304,12 +389,6 @@
                 const folder = zip.folder("Filtered_Sermons");
                 
                 try {
-                    // We need to fetch text for the filtered list.
-                    // This could be heavy, so we limit to chunk scanning if possible, 
-                    // OR we download individual files if count is low. 
-                    // Better approach: Scan the chunks again since we have the map.
-                    
-                    // Optimisation: Build a Set of needed IDs
                     const neededIds = new Set(filteredData.map(s => s.id));
                     let processed = 0;
 
@@ -320,7 +399,6 @@
                             const chunk = await res.json();
                             chunk.forEach(item => {
                                 if(neededIds.has(item.id)) {
-                                    // Find meta for filename
                                     const meta = filteredData.find(f => f.id === item.id);
                                     if(meta) {
                                         const cleanTitle = `${meta.date} - ${meta.church} - ${meta.title}`.replace(/[^a-z0-9 \-\.]/gi, '_');
@@ -347,7 +425,7 @@
                 }
             };
 
-            // 7. SEARCH HANDLER
+            // 8. SEARCH HANDLER
             const performSearch = async () => {
                 if (!searchQuery || searchQuery.length < 3) return;
                 setIsSearching(true);
@@ -378,6 +456,9 @@
                 setSearchResults(matches);
                 setIsSearching(false);
             };
+
+            // Helpers
+            const formatDate = (ts) => new Date(ts).toLocaleDateString();
 
             if (loading) return <div className="h-screen flex items-center justify-center font-medium text-gray-500">Loading Database...</div>;
             if (error) return <div className="h-screen flex items-center justify-center text-red-600 font-bold">{error}</div>;
@@ -445,11 +526,11 @@
                                     <StatCard title="Zero Rate" value={`${stats.zeroRate}%`} sub="Of Selection" icon="x" color="orange" />
                                 </div>
 
-                                {/* MAIN TREND CHART */}
+                                {/* CHART ROW 1: Trends & Yearly */}
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                                     <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm h-[450px]">
                                         <div className="flex justify-between items-center mb-6">
-                                            <h3 className="font-bold text-gray-800">Mentions Trend & Rolling Average</h3>
+                                            <h3 className="font-bold text-gray-800">Mentions Trend & Rolling Average (Overall)</h3>
                                             <div className="flex bg-gray-100 rounded-lg p-1">
                                                 {[7, 30, 180].map(d => (
                                                     <button key={d} onClick={() => setRollingDays(d)} className={`px-3 py-1 text-xs font-medium rounded ${rollingDays === d ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>
@@ -461,18 +542,16 @@
                                         <ResponsiveContainer width="100%" height="85%">
                                             <ComposedChart data={trendData}>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                <XAxis dataKey="date" tick={{fontSize: 10}} minTickGap={30} />
+                                                <XAxis dataKey="timestamp" type="number" scale="time" domain={['auto', 'auto']} tickFormatter={formatDate} tick={{fontSize: 10}} minTickGap={30} />
                                                 <YAxis yAxisId="left" tick={{fontSize: 10}} />
-                                                <YAxis yAxisId="right" orientation="right" hide />
-                                                <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'}} />
+                                                <Tooltip labelFormatter={formatDate} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'}} />
                                                 <Legend wrapperStyle={{fontSize: '12px', paddingTop: '10px'}} />
-                                                <Bar yAxisId="left" dataKey="mentionCount" name="Mentions (Raw)" fill="#cbd5e1" barSize={4} />
+                                                <Bar yAxisId="left" dataKey="mentionCount" name="Mentions (Raw)" fill="#cbd5e1" barSize={3} />
                                                 <Line yAxisId="left" type="monotone" dataKey="rollingAvg" name={`Rolling Avg (${rollingDays}d)`} stroke="#2563eb" strokeWidth={3} dot={false} />
                                             </ComposedChart>
                                         </ResponsiveContainer>
                                     </div>
 
-                                    {/* YEARLY SILENCE CHART */}
                                     <div className="bg-white p-6 rounded-xl border shadow-sm h-[450px]">
                                         <h3 className="font-bold text-gray-800 mb-2">Yearly Consistency</h3>
                                         <p className="text-xs text-gray-500 mb-6">Percentage of sermons with vs. without mentions</p>
@@ -487,6 +566,89 @@
                                                 <Bar dataKey="zeroPct" name="% Zero Mentions" stackId="a" fill="#ef4444" />
                                             </BarChart>
                                         </ResponsiveContainer>
+                                    </div>
+                                </div>
+
+                                {/* CHART ROW 2: COMPARATIVE ROLLING AVG */}
+                                <div className="bg-white p-6 rounded-xl border shadow-sm mb-8 h-[500px]">
+                                    <div className="flex justify-between items-center mb-6">
+                                        <div>
+                                            <h3 className="font-bold text-gray-800 flex items-center gap-2"><Icon name="lineChart" /> Church Trend Comparison</h3>
+                                            <p className="text-xs text-gray-500 mt-1">Comparing independent {rollingDays}-day rolling averages for each selected church.</p>
+                                        </div>
+                                    </div>
+                                    <ResponsiveContainer width="100%" height="85%">
+                                        <LineChart data={comparisonData}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                            <XAxis 
+                                                dataKey="timestamp" 
+                                                type="number" 
+                                                scale="time" 
+                                                domain={['auto', 'auto']} 
+                                                tickFormatter={formatDate}
+                                                tick={{fontSize: 10}} 
+                                            />
+                                            <YAxis tick={{fontSize: 10}} label={{ value: 'Avg Mentions', angle: -90, position: 'insideLeft', style: {fontSize: 10} }} />
+                                            <Tooltip labelFormatter={formatDate} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'}} />
+                                            <Legend wrapperStyle={{fontSize: '11px', paddingTop: '10px'}} />
+                                            {selChurches.map((church, i) => (
+                                                <Line 
+                                                    key={church} 
+                                                    type="monotone" 
+                                                    dataKey={church} 
+                                                    stroke={getColor(i)} 
+                                                    strokeWidth={2} 
+                                                    dot={false} 
+                                                    connectNulls={true} 
+                                                />
+                                            ))}
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+
+                                {/* DATA TABLE */}
+                                <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                                        <h3 className="font-bold text-gray-800">Sermon List ({filteredData.length})</h3>
+                                    </div>
+                                    <div className="overflow-x-auto max-h-[600px]">
+                                        <table className="w-full text-sm text-left text-gray-500">
+                                            <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10 shadow-sm">
+                                                <tr>
+                                                    <th className="px-6 py-3">Date</th>
+                                                    <th className="px-6 py-3">Church</th>
+                                                    <th className="px-6 py-3">Title</th>
+                                                    <th className="px-6 py-3">Speaker</th>
+                                                    <th className="px-6 py-3 text-right">Mentions</th>
+                                                    <th className="px-6 py-3 text-center">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {filteredData.map(s => (
+                                                    <tr key={s.id} onClick={() => setSelectedSermon(s)} className="hover:bg-blue-50 cursor-pointer transition">
+                                                        <td className="px-6 py-4 whitespace-nowrap">{s.date}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap"><span className="bg-gray-100 px-2 py-1 rounded text-xs font-semibold text-gray-600">{s.church}</span></td>
+                                                        <td className="px-6 py-4 font-medium text-gray-900">{s.title}</td>
+                                                        <td className="px-6 py-4">{s.speaker}</td>
+                                                        <td className={`px-6 py-4 text-right font-bold ${s.mentionCount === 0 ? 'text-red-500' : 'text-blue-600'}`}>{s.mentionCount}</td>
+                                                        <td className="px-6 py-4 text-center">
+                                                            <button 
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    const a = document.createElement('a');
+                                                                    a.href = s.path;
+                                                                    a.download = `${s.date} - ${s.title}.txt`;
+                                                                    a.click();
+                                                                }}
+                                                                className="text-gray-400 hover:text-blue-600" title="Download Transcript"
+                                                            >
+                                                                <Icon name="download" size={16} />
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </>
@@ -534,7 +696,7 @@
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div className="bg-white p-8 rounded-xl border shadow-sm">
                                     <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Icon name="download" /> Download Data</h3>
-                                    <p className="text-gray-600 mb-6 text-sm">Download raw transcripts for offline analysis. The "Custom Filtered Zip" will respect your current filters in the Dashboard.</p>
+                                    <p className="text-gray-600 mb-6 text-sm">Download raw transcripts for offline analysis.</p>
                                     
                                     <div className="space-y-3">
                                         <a href="all_sermons_archive.zip" download className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition">
@@ -546,17 +708,10 @@
                                             disabled={isZipping}
                                             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50"
                                         >
-                                            {isZipping ? <span>{zipProgress}</span> : <span>Download Custom Zip ({filteredData.length} Files)</span>}
-                                        </button>
-                                        
-                                        <button onClick={() => {
-                                            const blob = new Blob([JSON.stringify(filteredData, null, 2)], {type: 'application/json'});
-                                            const url = window.URL.createObjectURL(blob);
-                                            const a = document.createElement('a'); a.href = url; a.download = 'metadata_export.json'; a.click();
-                                        }} className="w-full border border-blue-200 text-blue-600 hover:bg-blue-50 font-bold py-3 px-4 rounded-lg">
-                                            Export Metadata (JSON)
+                                            {isZipping ? <span>{zipProgress}</span> : <span>Download Filtered Zip ({filteredData.length} Files)</span>}
                                         </button>
                                     </div>
+                                    <p className="mt-4 text-xs text-gray-400">The "Filtered Zip" generates a new archive containing only the sermons currently shown in your Dashboard.</p>
                                 </div>
 
                                 <div className="bg-white p-8 rounded-xl border shadow-sm">
