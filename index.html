@@ -136,7 +136,6 @@
             </div>
         );
 
-        // --- HEATMAP MODAL ---
         const HeatmapDetails = ({ data, onClose, onSelect }) => (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -273,7 +272,7 @@
             const [analysisEnd, setAnalysisEnd] = useState("");
             
             // TABLE FILTERS
-            const [tableFilters, setTableFilters] = useState({ date: '', church: '', title: '', speaker: '', mentions: '', rate: '' });
+            const [tableFilters, setTableFilters] = useState({ date: '', church: '', title: '', speaker: '', category: '', mentions: '', rate: '' });
             
             const [page, setPage] = useState(1);
             const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
@@ -358,6 +357,8 @@
                 if (tableFilters.church) data = data.filter(s => s.church.toLowerCase().includes(tableFilters.church.toLowerCase()));
                 if (tableFilters.title) data = data.filter(s => s.title.toLowerCase().includes(tableFilters.title.toLowerCase()));
                 if (tableFilters.speaker) data = data.filter(s => s.speaker.toLowerCase().includes(tableFilters.speaker.toLowerCase()));
+                // Type/Category Filter
+                if (tableFilters.category) data = data.filter(s => s.type.toLowerCase().includes(tableFilters.category.toLowerCase()));
                 if (tableFilters.mentions) data = data.filter(s => s.mentionCount >= parseInt(tableFilters.mentions));
                 if (tableFilters.rate) data = data.filter(s => s.mentionsPerHour >= parseFloat(tableFilters.rate));
 
@@ -396,7 +397,7 @@
                 return { totalSermons: total, totalMentions: mentions, maxMentions: max, zeroCount: zero, avg: (mentions / total).toFixed(1), zeroRate: ((zero / total) * 100).toFixed(1), topChurch, topRate: maxRate.toFixed(1) };
             }, [filteredData]);
 
-            // --- CHART 1: WEEKLY TREND MULTI-SERIES ---
+            // --- CHART DATA ---
             const trendData = useMemo(() => {
                 if (!filteredData.length) return [];
                 const weeklyData = {};
@@ -424,7 +425,6 @@
                 return result;
             }, [filteredData, rollingWeeks, selChurches]);
 
-            // --- CHART 2: AGGREGATE ACTIVITY ---
             const aggregateActivityData = useMemo(() => {
                 if (!filteredData.length) return [];
                 const sorted = [...filteredData].sort((a,b) => a.timestamp - b.timestamp);
@@ -559,6 +559,7 @@
                                     <StatCard title="Zero Rate" value={`${stats.zeroRate}%`} icon="x" color="orange" />
                                 </div>
 
+                                {/* AGGREGATE ACTIVITY CHART */}
                                 <div className="bg-white p-6 rounded-xl border shadow-sm h-[500px] mb-8">
                                     <div className="flex justify-between items-center mb-6">
                                         <div><h3 className="font-bold text-gray-800 flex items-center gap-2"><Icon name="activity" /> Detailed Sermon Activity & Trend</h3><p className="text-xs text-gray-500 mt-1">Bars = Individual Sermons. Line = {aggregateWindow < 5 ? '1 Mo' : aggregateWindow < 20 ? '3 Mo' : '6 Mo'} Aggregate Trend.</p></div>
@@ -577,6 +578,7 @@
                                     </ResponsiveContainer>
                                 </div>
 
+                                {/* WEEKLY TREND CHART */}
                                 <div className="bg-white p-6 rounded-xl border shadow-sm h-[500px] mb-8">
                                     <div className="flex justify-between items-center mb-6">
                                         <div><h3 className="font-bold text-gray-800 flex items-center gap-2"><Icon name="lineChart" /> Frequency Over Time</h3><p className="text-xs text-gray-500 mt-1">Rolling average of Weekly Sums.</p></div>
@@ -621,6 +623,7 @@
                                                     <th onClick={() => handleSort('date')} className="px-4 py-3 w-28"><div className="flex items-center gap-1">Date {sortConfig.key==='date' && (sortConfig.direction==='asc'?<Icon name="sortAsc" size={14}/>:<Icon name="sortDesc" size={14}/>)}</div></th>
                                                     <th onClick={() => handleSort('church')} className="px-4 py-3 w-48"><div className="flex items-center gap-1">Church {sortConfig.key==='church' && (sortConfig.direction==='asc'?<Icon name="sortAsc" size={14}/>:<Icon name="sortDesc" size={14}/>)}</div></th>
                                                     <th onClick={() => handleSort('title')} className="px-4 py-3 w-64"><div className="flex items-center gap-1">Title {sortConfig.key==='title' && (sortConfig.direction==='asc'?<Icon name="sortAsc" size={14}/>:<Icon name="sortDesc" size={14}/>)}</div></th>
+                                                    <th onClick={() => handleSort('type')} className="px-4 py-3 w-32"><div className="flex items-center gap-1">Type {sortConfig.key==='type' && (sortConfig.direction==='asc'?<Icon name="sortAsc" size={14}/>:<Icon name="sortDesc" size={14}/>)}</div></th>
                                                     <th onClick={() => handleSort('speaker')} className="px-4 py-3 w-40"><div className="flex items-center gap-1">Speaker {sortConfig.key==='speaker' && (sortConfig.direction==='asc'?<Icon name="sortAsc" size={14}/>:<Icon name="sortDesc" size={14}/>)}</div></th>
                                                     <th onClick={() => handleSort('mentionCount')} className="px-4 py-3 w-24 text-right"><div className="flex items-center justify-end gap-1">Mentions {sortConfig.key==='mentionCount' && (sortConfig.direction==='asc'?<Icon name="sortAsc" size={14}/>:<Icon name="sortDesc" size={14}/>)}</div></th>
                                                     <th onClick={() => handleSort('mentionsPerHour')} className="px-4 py-3 w-24 text-right"><div className="flex items-center justify-end gap-1">Rate/Hr {sortConfig.key==='mentionsPerHour' && (sortConfig.direction==='asc'?<Icon name="sortAsc" size={14}/>:<Icon name="sortDesc" size={14}/>)}</div></th>
@@ -630,6 +633,7 @@
                                                     <th className="px-2 py-2"><input type="text" placeholder="YYYY-MM" className="w-full text-xs p-1 border rounded" value={tableFilters.date} onChange={(e) => updateFilter('date', e.target.value)} /></th>
                                                     <th className="px-2 py-2"><input type="text" placeholder="Filter Church..." className="w-full text-xs p-1 border rounded" value={tableFilters.church} onChange={(e) => updateFilter('church', e.target.value)} /></th>
                                                     <th className="px-2 py-2"><input type="text" placeholder="Filter Title..." className="w-full text-xs p-1 border rounded" value={tableFilters.title} onChange={(e) => updateFilter('title', e.target.value)} /></th>
+                                                    <th className="px-2 py-2"><input type="text" placeholder="Filter Type..." className="w-full text-xs p-1 border rounded" value={tableFilters.category} onChange={(e) => updateFilter('category', e.target.value)} /></th>
                                                     <th className="px-2 py-2"><input type="text" placeholder="Filter Speaker..." className="w-full text-xs p-1 border rounded" value={tableFilters.speaker} onChange={(e) => updateFilter('speaker', e.target.value)} /></th>
                                                     <th className="px-2 py-2"><input type="number" placeholder="Min" className="w-full text-xs p-1 border rounded text-right" value={tableFilters.mentions} onChange={(e) => updateFilter('mentions', e.target.value)} /></th>
                                                     <th className="px-2 py-2"><input type="number" step="0.1" placeholder="Min" className="w-full text-xs p-1 border rounded text-right" value={tableFilters.rate} onChange={(e) => updateFilter('rate', e.target.value)} /></th>
@@ -642,6 +646,7 @@
                                                         <td className="px-4 py-3 truncate" title={s.date}>{s.date}</td>
                                                         <td className="px-4 py-3 truncate" title={s.church}><span className="bg-gray-100 px-2 py-1 rounded text-xs font-semibold text-gray-600">{s.church}</span></td>
                                                         <td className="px-4 py-3 font-medium text-gray-900 truncate" title={s.title}>{s.title}</td>
+                                                        <td className="px-4 py-3 truncate" title={s.type}><span className="bg-gray-50 px-2 py-1 rounded text-xs border">{s.type}</span></td>
                                                         <td className="px-4 py-3 truncate" title={s.speaker}>{s.speaker}</td>
                                                         <td className={`px-4 py-3 text-right font-bold ${s.mentionCount === 0 ? 'text-red-500' : 'text-blue-600'}`}>{s.mentionCount}</td>
                                                         <td className="px-4 py-3 text-right text-xs">{s.mentionsPerHour}</td>
