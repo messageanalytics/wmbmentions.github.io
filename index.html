@@ -14,8 +14,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <script type="importmap">
-      { "imports": { "@google/generative-ai": "https://esm.run/@google/generative-ai" } }
+    <script type="module">
+      import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
+      window.GoogleGenerativeAI = GoogleGenerativeAI;
     </script>
 
     <style>
@@ -45,15 +46,14 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel" type="module">
-        import { GoogleGenerativeAI } from "@google/generative-ai";
-
+    <script type="text/babel">
         const { useState, useEffect, useMemo, useRef, useCallback } = React;
         const { 
             ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
             ResponsiveContainer, Brush, BarChart, LineChart, ScatterChart, Scatter, ZAxis, AreaChart, Area
         } = Recharts;
 
+        // --- CONFIGURATION ---
         const MENTION_REGEX = /(?:brother\s+william|william|brother)\s+br[aeiou]n[dh]*[aeiou]m/gi;
         const WORDS_PER_MINUTE = 140; 
 
@@ -71,6 +71,7 @@
         const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#be123c", "#4f46e5"];
         const getColor = (index) => COLORS[index % COLORS.length];
 
+        // --- ICONS ---
         const Icon = ({ name, size = 18, className = "" }) => {
             const icons = {
                 search: <path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />,
@@ -240,7 +241,7 @@
                 setChatInput("");
                 setIsChatting(true);
                 try {
-                    const genAI = new GoogleGenerativeAI(apiKey);
+                    const genAI = new window.GoogleGenerativeAI(apiKey);
                     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash"});
                     const prompt = `Title: ${sermon.title}\nSpeaker: ${sermon.speaker}\nDate: ${sermon.date}\nContext: ${fullText.substring(0, 30000)}...\nUser: ${userMsg}`;
                     const result = await model.generateContent(prompt);
@@ -329,6 +330,7 @@
             const [apiPrefix, setApiPrefix] = useState("site_api/");
             const [totalChunks, setTotalChunks] = useState(0);
 
+            // STATE
             const [selChurches, setSelChurches] = useState([]);
             const [selSpeakers, setSelSpeakers] = useState([]);
             const [selYears, setSelYears] = useState([]);
@@ -338,14 +340,20 @@
             const [aggregateWindow, setAggregateWindow] = useState(26); 
             const [view, setView] = useState("dashboard");
             const [highlightedChurch, setHighlightedChurch] = useState(null);
+            const [analysisStart, setAnalysisStart] = useState("");
+            const [analysisEnd, setAnalysisEnd] = useState("");
             
+            // TABLE FILTERS
             const [tableFilters, setTableFilters] = useState({ date: '', church: '', title: '', speaker: '', category: '', mentions: '', rate: '' });
+            
             const [page, setPage] = useState(1);
             const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
             const PAGE_SIZE = 50;
 
+            // MODALS
             const [selectedSermon, setSelectedSermon] = useState(null);
             const [heatmapModalData, setHeatmapModalData] = useState(null); 
+            
             const [isZipping, setIsZipping] = useState(false);
             const [zipProgress, setZipProgress] = useState("");
             const [searchQuery, setSearchQuery] = useState("");
@@ -385,6 +393,14 @@
                         setSelYears(defaultYears.length > 0 ? defaultYears : years);
                         const langs = [...new Set(list.map(s => s.language))];
                         setSelLangs(langs.includes("English") ? ["English"] : langs);
+                        
+                        const dates = list.map(s => s.date).sort();
+                        if (dates.length) {
+                            setAnalysisEnd(dates[dates.length - 1]);
+                            const d = new Date(dates[dates.length - 1]);
+                            d.setFullYear(d.getFullYear() - 1);
+                            setAnalysisStart(d.toISOString().split('T')[0]);
+                        }
                         setLoading(false);
                     } catch (e) { setError(e.message); setLoading(false); }
                 };
@@ -400,12 +416,20 @@
                 return rawData.filter(s => selChurches.includes(s.church) && selSpeakers.includes(s.speaker) && selYears.includes(s.year) && selTypes.includes(s.type) && selLangs.includes(s.language));
             }, [rawData, selChurches, selSpeakers, selYears, selTypes, selLangs]);
 
+            const analysisData = useMemo(() => {
+                if (!analysisStart || !analysisEnd) return filteredData;
+                return filteredData.filter(s => s.date >= analysisStart && s.date <= analysisEnd);
+            }, [filteredData, analysisStart, analysisEnd]);
+
+            // --- SORTING & FILTERING LOGIC (TABLE) ---
             const processedTableData = useMemo(() => {
                 let data = [...filteredData];
+                
                 if (tableFilters.date) data = data.filter(s => s.date.includes(tableFilters.date));
                 if (tableFilters.church) data = data.filter(s => s.church.toLowerCase().includes(tableFilters.church.toLowerCase()));
                 if (tableFilters.title) data = data.filter(s => s.title.toLowerCase().includes(tableFilters.title.toLowerCase()));
                 if (tableFilters.speaker) data = data.filter(s => s.speaker.toLowerCase().includes(tableFilters.speaker.toLowerCase()));
+                // Type/Category Filter
                 if (tableFilters.category) data = data.filter(s => s.type.toLowerCase().includes(tableFilters.category.toLowerCase()));
                 if (tableFilters.mentions) data = data.filter(s => s.mentionCount >= parseInt(tableFilters.mentions));
                 if (tableFilters.rate) data = data.filter(s => s.mentionsPerHour >= parseFloat(tableFilters.rate));
@@ -495,9 +519,16 @@
                 });
             }, [filteredData, aggregateWindow]);
 
+            const dependenceData = useMemo(() => {
+                if (!analysisData.length) return [];
+                const buckets = {};
+                analysisData.forEach(s => { if (!buckets[s.church]) buckets[s.church] = { m: 0, d: 0 }; buckets[s.church].m += s.mentionCount; buckets[s.church].d += s.durationHrs; });
+                return Object.entries(buckets).map(([c, d]) => ({ church: c, mph: d.d > 0 ? parseFloat((d.m / d.d).toFixed(1)) : 0 })).sort((a,b) => b.mph - a.mph);
+            }, [analysisData]);
+
             const heatmapData = useMemo(() => {
-                if (!filteredData.length) return { weeks: [], churches: [] };
-                const times = filteredData.map(s => s.timestamp);
+                if (!analysisData.length) return { weeks: [], churches: [] };
+                const times = analysisData.map(s => s.timestamp);
                 const weeks = [];
                 let current = new Date(Math.min(...times)); current.setDate(current.getDate() - current.getDay());
                 const end = new Date(Math.max(...times));
@@ -508,39 +539,36 @@
                 const churchRows = selChurches.map(c => ({
                     church: c,
                     cells: weeks.map(w => {
-                        const sermons = filteredData.filter(s => s.church === c && s.timestamp >= w.start && s.timestamp < w.end);
+                        const sermons = analysisData.filter(s => s.church === c && s.timestamp >= w.start && s.timestamp < w.end);
                         if (!sermons.length) return { val: -1 };
                         const tm = sermons.reduce((a,s)=>a+s.mentionCount,0), td = sermons.reduce((a,s)=>a+s.durationHrs,0);
                         return { val: td > 0 ? tm/td : 0, count: sermons.length, sermons: sermons };
                     })
                 }));
                 return { weeks, rows: churchRows };
-            }, [filteredData, selChurches]);
+            }, [analysisData, selChurches]);
 
-            const dependenceData = useMemo(() => {
-                if (!filteredData.length) return [];
+            const stackedData = useMemo(() => {
+                if (!analysisData.length) return [];
                 const buckets = {};
-                filteredData.forEach(s => { if (!buckets[s.church]) buckets[s.church] = { m: 0, d: 0 }; buckets[s.church].m += s.mentionCount; buckets[s.church].d += s.durationHrs; });
-                return Object.entries(buckets).map(([c, d]) => ({ church: c, mph: d.d > 0 ? parseFloat((d.m / d.d).toFixed(1)) : 0 })).sort((a,b) => b.mph - a.mph);
-            }, [filteredData]);
+                analysisData.forEach(s => { const m = s.date.substring(0,7); if (!buckets[m]) buckets[m] = { date: m, time: new Date(m).getTime() }; if (!buckets[m][s.church]) buckets[m][s.church] = 0; buckets[m][s.church] += s.mentionCount; });
+                return Object.values(buckets).sort((a,b) => a.time - b.time);
+            }, [analysisData]);
 
-            // --- COMPARATIVE BALANCE CHART (JESUS vs BRANHAM) ---
+            const bubbleData = useMemo(() => [...filteredData].sort((a,b)=>b.mentionCount-a.mentionCount).slice(0,20).map(s=>({x: parseFloat(s.durationHrs.toFixed(2)), y: s.mentionCount, z: 1, title: s.title, church: s.church, rawData: s})), [filteredData]);
+
             const balanceData = useMemo(() => {
                 if (!filteredData.length) return [];
                 const sorted = [...filteredData].sort((a,b) => a.timestamp - b.timestamp);
-                
-                // Rolling Avg Calculation
                 return sorted.map((item, index, arr) => {
                     const cutoff = item.timestamp - (aggregateWindow * 7 * 24 * 60 * 60 * 1000);
                     let sumB = 0, sumJ = 0, count = 0;
-                    
                     for (let i = index; i >= 0; i--) {
                         if (arr[i].timestamp < cutoff) break;
                         sumB += arr[i].mentionCount;
                         sumJ += (arr[i].jesusCount || 0);
                         count++;
                     }
-                    
                     return {
                         timestamp: item.timestamp,
                         date: item.date,
@@ -696,6 +724,11 @@
                                     </div>
                                 </div>
 
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                                    <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm h-[400px]"><h3 className="font-bold text-gray-800 mb-2">Total Volume Stack</h3><ResponsiveContainer width="100%" height="85%"><AreaChart data={stackedData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="date" tick={{fontSize: 10}} minTickGap={30} /><YAxis tick={{fontSize: 10}} /><Tooltip /><Legend />{selChurches.map((c, i) => <Area key={c} type="monotone" dataKey={c} stackId="1" stroke={getColor(i)} fill={getColor(i)} />)}</AreaChart></ResponsiveContainer></div>
+                                    <div className="bg-white p-6 rounded-xl border shadow-sm"><h3 className="font-bold text-gray-800 mb-2">Top Outlier Sermons</h3><div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar">{bubbleData.map((s, i) => (<div key={i} onClick={() => setSelectedSermon(s.rawData)} className="p-3 bg-gray-50 rounded border hover:bg-blue-50 cursor-pointer"><div className="flex justify-between items-start"><h4 className="text-xs font-bold text-blue-700 line-clamp-2">{s.title}</h4><span className="bg-red-100 text-red-800 text-[10px] px-1.5 py-0.5 rounded-full font-bold">{s.y}</span></div><p className="text-[10px] text-gray-500 mt-1">{s.church}</p></div>))}</div></div>
+                                </div>
+
                                 <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
                                     <div className="p-6 border-b border-gray-100 flex justify-between items-center"><h3 className="font-bold text-gray-800">Sermon List ({processedTableData.length})</h3></div>
                                     <div className="overflow-x-auto">
@@ -744,7 +777,49 @@
                                 </div>
                             </>
                         )}
-                        {/* Search & Data Tabs omitted for brevity */}
+                        {/* Search View */}
+                        {view === 'search' && (
+                            <div className="max-w-4xl mx-auto">
+                                <div className="bg-white p-8 rounded-xl border shadow-sm text-center mb-8">
+                                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Deep Transcript Search</h2>
+                                    <div className="flex gap-2 relative">
+                                        <Icon name="search" className="absolute left-4 top-3.5 text-gray-400" />
+                                        <input type="text" className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg shadow-sm" placeholder="Search quote, doctrine, or name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && performSearch()} />
+                                        <button onClick={performSearch} disabled={isSearching} className="bg-blue-600 text-white px-8 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50">{isSearching ? "..." : "Search"}</button>
+                                    </div>
+                                    {isSearching && <p className="mt-4 text-blue-600 animate-pulse text-sm">{searchProgress}</p>}
+                                </div>
+                                <div className="space-y-4">
+                                    {searchResults.map((res, i) => (
+                                        <div key={i} onClick={() => setSelectedSermon({...res, searchTerm: searchQuery})} className="bg-white p-6 rounded-xl border hover:border-blue-300 shadow-sm cursor-pointer transition">
+                                            <div className="flex justify-between items-start mb-3">
+                                                <div><h4 className="text-lg font-bold text-blue-600 hover:underline">{res.title}</h4><p className="text-sm text-gray-500">{res.date} • {res.church}</p></div>
+                                                <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded font-bold border border-yellow-200">{res.displayMentions} Matches</span>
+                                            </div>
+                                            <p className="text-gray-600 bg-gray-50 p-4 rounded-lg text-sm font-serif italic border-l-4 border-gray-300">"{res.snippet}"</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        {/* Data View */}
+                        {view === 'data' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div className="bg-white p-8 rounded-xl border shadow-sm">
+                                    <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Icon name="download" /> Download Data</h3>
+                                    <div className="space-y-3">
+                                        <a href="all_sermons_archive.zip" download className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition"><span>Download Full Archive (All)</span></a>
+                                        <button onClick={handleCustomDownload} disabled={isZipping} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50">{isZipping ? <span>{zipProgress}</span> : <span>Download Filtered Zip ({filteredData.length} Files)</span>}</button>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-8 rounded-xl border shadow-sm">
+                                    <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Icon name="info" /> Data Sources</h3>
+                                    <ul className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                                        {CHANNEL_SOURCES.map((c, i) => <li key={i} className="text-sm bg-gray-50 p-3 rounded border flex justify-between items-center hover:bg-gray-100"><span className="font-medium text-gray-700">{c.name}</span><a href={c.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">Visit Channel &rarr;</a></li>)}
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
                     </main>
                     {selectedSermon && <SermonModal sermon={selectedSermon} onClose={() => setSelectedSermon(null)} />}
                     {heatmapModalData && <HeatmapDetails data={heatmapModalData} onClose={() => setHeatmapModalData(null)} onSelect={(s) => { setHeatmapModalData(null); setSelectedSermon(s); }} />}
