@@ -71,7 +71,6 @@
         const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#be123c", "#4f46e5"];
         const getColor = (index) => COLORS[index % COLORS.length];
 
-        // --- ICONS ---
         const Icon = ({ name, size = 18, className = "" }) => {
             const icons = {
                 search: <path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />,
@@ -202,10 +201,10 @@
             );
         };
 
-        const SermonModal = ({ sermon, onClose }) => {
+        const SermonModal = ({ sermon, onClose, initialView }) => {
             const [fullText, setFullText] = useState("");
             const [isLoading, setIsLoading] = useState(true);
-            const [viewMode, setViewMode] = useState("snippets"); 
+            const [viewMode, setViewMode] = useState(initialView || "snippets"); 
             const [mentions, setMentions] = useState([]);
             
             // AI CHAT
@@ -227,7 +226,8 @@
                         let match;
                         while ((match = regex.exec(text)) !== null) { found.push({ index: match.index, term: match[0] }); }
                         setMentions(found);
-                        if (found.length === 0) setViewMode("full");
+                        // Only auto-switch to full if NOT in chat mode and NO mentions
+                        if (found.length === 0 && viewMode !== "chat") setViewMode("full");
                     })
                     .catch(() => { setFullText("Error loading transcript."); setIsLoading(false); });
             }, [sermon]);
@@ -302,6 +302,7 @@
                                                         <p className="text-sm text-gray-500 mb-6">To ask questions about this transcript, you need a free Google Gemini API key.</p>
                                                         <input type="password" placeholder="Paste Gemini API Key" className="w-full border p-2 rounded mb-4 text-sm" onKeyDown={(e) => {if(e.key === 'Enter') saveKey(e.target.value)}} />
                                                         <button onClick={(e) => saveKey(e.target.previousSibling.value)} className="w-full bg-purple-600 text-white py-2 rounded font-bold hover:bg-purple-700">Save Key</button>
+                                                        <p className="text-xs text-gray-400 mt-4"><a href="https://aistudio.google.com/app/apikey" target="_blank" className="underline hover:text-purple-600">Get a free key here</a></p>
                                                     </div>
                                                 </div>
                                             ) : (
@@ -330,7 +331,6 @@
             const [apiPrefix, setApiPrefix] = useState("site_api/");
             const [totalChunks, setTotalChunks] = useState(0);
 
-            // STATE
             const [selChurches, setSelChurches] = useState([]);
             const [selSpeakers, setSelSpeakers] = useState([]);
             const [selYears, setSelYears] = useState([]);
@@ -343,17 +343,14 @@
             const [analysisStart, setAnalysisStart] = useState("");
             const [analysisEnd, setAnalysisEnd] = useState("");
             
-            // TABLE FILTERS
             const [tableFilters, setTableFilters] = useState({ date: '', church: '', title: '', speaker: '', category: '', mentions: '', rate: '' });
-            
             const [page, setPage] = useState(1);
             const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
             const PAGE_SIZE = 50;
 
-            // MODALS
             const [selectedSermon, setSelectedSermon] = useState(null);
+            const [initialModalView, setInitialModalView] = useState("snippets");
             const [heatmapModalData, setHeatmapModalData] = useState(null); 
-            
             const [isZipping, setIsZipping] = useState(false);
             const [zipProgress, setZipProgress] = useState("");
             const [searchQuery, setSearchQuery] = useState("");
@@ -421,15 +418,12 @@
                 return filteredData.filter(s => s.date >= analysisStart && s.date <= analysisEnd);
             }, [filteredData, analysisStart, analysisEnd]);
 
-            // --- SORTING & FILTERING LOGIC (TABLE) ---
             const processedTableData = useMemo(() => {
                 let data = [...filteredData];
-                
                 if (tableFilters.date) data = data.filter(s => s.date.includes(tableFilters.date));
                 if (tableFilters.church) data = data.filter(s => s.church.toLowerCase().includes(tableFilters.church.toLowerCase()));
                 if (tableFilters.title) data = data.filter(s => s.title.toLowerCase().includes(tableFilters.title.toLowerCase()));
                 if (tableFilters.speaker) data = data.filter(s => s.speaker.toLowerCase().includes(tableFilters.speaker.toLowerCase()));
-                // Type/Category Filter
                 if (tableFilters.category) data = data.filter(s => s.type.toLowerCase().includes(tableFilters.category.toLowerCase()));
                 if (tableFilters.mentions) data = data.filter(s => s.mentionCount >= parseInt(tableFilters.mentions));
                 if (tableFilters.rate) data = data.filter(s => s.mentionsPerHour >= parseFloat(tableFilters.rate));
@@ -462,21 +456,13 @@
                 const mentions = filteredData.reduce((acc, s) => acc + s.mentionCount, 0);
                 const max = Math.max(...filteredData.map(s => s.mentionCount));
                 
-                // NEW METRICS
                 const totalJesus = filteredData.reduce((acc, s) => acc + (s.jesusCount || 0), 0);
                 const ratio = totalJesus > 0 ? (mentions / totalJesus).toFixed(2) : "N/A";
 
-                return { 
-                    totalSermons: total, 
-                    totalMentions: mentions, 
-                    maxMentions: max, 
-                    avg: (mentions / total).toFixed(1),
-                    totalJesus: totalJesus.toLocaleString(),
-                    ratio: ratio
-                };
+                return { totalSermons: total, totalMentions: mentions, maxMentions: max, avg: (mentions / total).toFixed(1), totalJesus: totalJesus.toLocaleString(), ratio: ratio };
             }, [filteredData]);
 
-            // --- CHART DATA ---
+            // CHARTS
             const trendData = useMemo(() => {
                 if (!filteredData.length) return [];
                 const weeklyData = {};
@@ -563,31 +549,43 @@
                 return sorted.map((item, index, arr) => {
                     const cutoff = item.timestamp - (aggregateWindow * 7 * 24 * 60 * 60 * 1000);
                     let sumB = 0, sumJ = 0, count = 0;
-                    for (let i = index; i >= 0; i--) {
-                        if (arr[i].timestamp < cutoff) break;
-                        sumB += arr[i].mentionCount;
-                        sumJ += (arr[i].jesusCount || 0);
-                        count++;
-                    }
-                    return {
-                        timestamp: item.timestamp,
-                        date: item.date,
-                        branhamAvg: count > 0 ? parseFloat((sumB / count).toFixed(1)) : 0,
-                        jesusAvg: count > 0 ? parseFloat((sumJ / count).toFixed(1)) : 0
-                    };
+                    for (let i = index; i >= 0; i--) { if (arr[i].timestamp < cutoff) break; sumB += arr[i].mentionCount; sumJ += (arr[i].jesusCount || 0); count++; }
+                    return { timestamp: item.timestamp, date: item.date, branhamAvg: count > 0 ? parseFloat((sumB / count).toFixed(1)) : 0, jesusAvg: count > 0 ? parseFloat((sumJ / count).toFixed(1)) : 0 };
                 });
             }, [filteredData, aggregateWindow]);
 
-            const performSearch = async () => { /* Parallel logic */ 
-                if (!searchQuery || searchQuery.length < 3) return; setIsSearching(true); setSearchResults([]); setSearchProgress("Scanning...");
-                const term = searchQuery.toLowerCase(); const termRegex = new RegExp(`(${term})`, 'gi'); let matches = [];
-                for (let i=0; i<totalChunks; i+=5) {
-                    setSearchProgress(`Scanning chunks ${i+1}-${Math.min(i+5, totalChunks)}...`);
-                    const res = await Promise.all([...Array(Math.min(5, totalChunks-i))].map((_,j)=>fetch(`${apiPrefix}text_chunk_${i+j}.json`).then(r=>r.ok?r.json():[])));
-                    res.flat().forEach(item => { if (item.text.toLowerCase().includes(term)) {
-                        const meta = rawData.find(r=>r.id===item.id);
-                        if (meta) { matches.push({ ...meta, snippet: "..." + item.text.substring(Math.max(0, item.text.toLowerCase().indexOf(term)-100), Math.min(item.text.length, item.text.toLowerCase().indexOf(term)+100)) + "...", displayMentions: (item.text.match(termRegex)||[]).length, searchTerm: term }); }
-                    }});
+            // Optimized Parallel Search (10 chunks)
+            const performSearch = async () => {
+                if (!searchQuery || searchQuery.length < 3) return;
+                setIsSearching(true); setSearchResults([]); setSearchProgress("Scanning...");
+                const term = searchQuery.toLowerCase(); 
+                const termRegex = new RegExp(`(${term})`, 'gi'); 
+                let matches = [];
+                const CHUNK_BATCH_SIZE = 10;
+                
+                for (let i=0; i<totalChunks; i+=CHUNK_BATCH_SIZE) {
+                    const batchEnd = Math.min(i+CHUNK_BATCH_SIZE, totalChunks);
+                    setSearchProgress(`Scanning chunks ${i+1}-${batchEnd} of ${totalChunks}...`);
+                    const promises = [];
+                    for(let j=i; j<batchEnd; j++) {
+                        promises.push(fetch(`${apiPrefix}text_chunk_${j}.json`).then(r=>r.ok?r.json():[]).catch(()=>[]));
+                    }
+                    const results = await Promise.all(promises);
+                    results.forEach(chunk => {
+                        chunk.forEach(item => { 
+                            if (item.text.toLowerCase().indexOf(term) !== -1) {
+                                const meta = rawData.find(r=>r.id===item.id);
+                                if (meta) { 
+                                    // Extract top 3 snippets for speed
+                                    const text = item.text;
+                                    const snippetIdx = text.toLowerCase().indexOf(term);
+                                    const snippet = "..." + text.substring(Math.max(0, snippetIdx-100), Math.min(text.length, snippetIdx+100)) + "...";
+                                    const displayMentions = (text.match(termRegex)||[]).length;
+                                    matches.push({ ...meta, snippet, displayMentions, searchTerm: term }); 
+                                }
+                            }
+                        });
+                    });
                 }
                 setSearchResults(matches); setIsSearching(false);
             };
@@ -597,7 +595,7 @@
                 const zip = new JSZip(); const folder = zip.folder("Filtered_Sermons");
                 try {
                     const neededIds = new Set(filteredData.map(s => s.id));
-                    const BATCH = 5;
+                    const BATCH = 10;
                     for(let i=0; i<totalChunks; i+=BATCH) {
                         setZipProgress(`Scanning database... ${(i/totalChunks*100).toFixed(0)}%`);
                         const promises = [];
@@ -614,6 +612,8 @@
                     const a = document.createElement('a'); a.href = window.URL.createObjectURL(content); a.download = `Custom_Sermon_Export.zip`; a.click();
                 } catch(e) { alert("Download failed"); } finally { setIsZipping(false); }
             };
+
+            const openSermon = (s, mode="snippets") => { setSelectedSermon(s); setInitialModalView(mode); };
 
             const formatDate = (ts) => new Date(ts).toLocaleDateString();
 
@@ -656,7 +656,6 @@
                                     <StatCard title="B/J Quotient" value={stats.ratio} sub="Branham vs Jesus" icon="activity" color="purple" />
                                 </div>
 
-                                {/* CHART 1: AGGREGATE ACTIVITY */}
                                 <div className="bg-white p-6 rounded-xl border shadow-sm h-[500px] mb-8">
                                     <div className="flex justify-between items-center mb-6">
                                         <div><h3 className="font-bold text-gray-800 flex items-center gap-2"><Icon name="activity" /> Detailed Sermon Activity & Trend</h3><p className="text-xs text-gray-500 mt-1">Bars = Individual Sermons. Line = {aggregateWindow < 5 ? '1 Mo' : aggregateWindow < 20 ? '3 Mo' : '6 Mo'} Aggregate Trend.</p></div>
@@ -675,7 +674,6 @@
                                     </ResponsiveContainer>
                                 </div>
 
-                                {/* CHART 2: WEEKLY TREND MULTI-SERIES */}
                                 <div className="bg-white p-6 rounded-xl border shadow-sm h-[500px] mb-8">
                                     <div className="flex justify-between items-center mb-6">
                                         <div><h3 className="font-bold text-gray-800 flex items-center gap-2"><Icon name="lineChart" /> Frequency Over Time</h3><p className="text-xs text-gray-500 mt-1">Rolling average of Weekly Sums.</p></div>
@@ -693,7 +691,6 @@
                                     </ResponsiveContainer>
                                 </div>
 
-                                {/* CHART 3: BALANCE (JESUS vs BRANHAM) */}
                                 <div className="bg-white p-6 rounded-xl border shadow-sm h-[500px] mb-8">
                                     <div className="flex justify-between items-center mb-6">
                                         <div><h3 className="font-bold text-gray-800 flex items-center gap-2"><Icon name="activity" /> Theology Balance: Jesus vs. Branham</h3><p className="text-xs text-gray-500 mt-1">Comparing rolling average mention counts.</p></div>
@@ -711,22 +708,22 @@
                                     </ResponsiveContainer>
                                 </div>
 
-                                {/* HEATMAP & RANKINGS (Now using global filters) */}
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                                     <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm overflow-hidden flex flex-col">
                                         <div className="flex justify-between items-center mb-4">
                                             <div><h3 className="font-bold text-gray-800 flex items-center gap-2"><Icon name="grid" /> Intensity Heatmap</h3><p className="text-xs text-gray-500">Normalized Mentions/Hour. Click a tile for details.</p></div>
+                                            <div className="flex items-center gap-2 text-xs"><input type="date" value={analysisStart} onChange={(e) => setAnalysisStart(e.target.value)} className="border p-1 rounded" /><span>-</span><input type="date" value={analysisEnd} onChange={(e) => setAnalysisEnd(e.target.value)} className="border p-1 rounded" /></div>
                                         </div>
                                         <div className="flex-1 overflow-x-auto custom-scrollbar"><div style={{ minWidth: heatmapData.weeks.length * 20 + 200 }}><div className="flex"><div className="w-48 flex-shrink-0"></div>{heatmapData.weeks.map((w, i) => (i % 4 === 0 && <div key={w.id} className="w-5 text-[9px] text-gray-400 -rotate-90 origin-bottom-left translate-y-8">{w.label}</div>))}</div><div className="mt-8 space-y-1">{heatmapData.rows.map((row, i) => (<div key={row.church} className="flex items-center h-6"><div className="w-48 flex-shrink-0 text-xs text-gray-600 truncate pr-2 text-right" title={row.church}>{row.church}</div><div className="flex gap-[2px]">{row.cells.map((cell, ci) => { let bg = 'bg-gray-100'; if (cell.val >= 0) { if (cell.val === 0) bg = 'bg-gray-200'; else if (cell.val < 10) bg = 'bg-blue-200'; else if (cell.val < 25) bg = 'bg-blue-400'; else if (cell.val < 50) bg = 'bg-blue-600'; else bg = 'bg-red-600'; } return <div key={ci} onClick={() => cell.val >= 0 && setHeatmapModalData({ ...cell, label: heatmapData.weeks[ci].label })} title={`${heatmapData.weeks[ci].label}: ${cell.val >= 0 ? cell.val.toFixed(1) + '/hr' : 'No Sermon'}`} className={`w-4 h-5 rounded-sm heatmap-cell ${bg}`}></div> })}</div></div>))}</div></div></div></div>
                                     <div className="bg-white p-6 rounded-xl border shadow-sm">
-                                        <h3 className="font-bold text-gray-800 mb-2">Dependence Ranking</h3><p className="text-xs text-gray-500 mb-4">Avg Mentions/Hr in current view.</p>
+                                        <h3 className="font-bold text-gray-800 mb-2">Dependence Ranking</h3><p className="text-xs text-gray-500 mb-4">Avg Mentions/Hr in selected period.</p>
                                         <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">{dependenceData.map((d, i) => (<div key={d.church} className="space-y-1"><div className="flex justify-between text-xs font-medium"><span className="truncate w-3/4">{i+1}. {d.church}</span><span className="text-blue-700">{d.mph}</span></div><div className="w-full bg-gray-100 rounded-full h-2"><div className="bg-blue-600 h-2 rounded-full" style={{ width: `${Math.min(100, (d.mph / dependenceData[0].mph) * 100)}%` }}></div></div></div>))}</div>
                                     </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                                     <div className="lg:col-span-2 bg-white p-6 rounded-xl border shadow-sm h-[400px]"><h3 className="font-bold text-gray-800 mb-2">Total Volume Stack</h3><ResponsiveContainer width="100%" height="85%"><AreaChart data={stackedData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="date" tick={{fontSize: 10}} minTickGap={30} /><YAxis tick={{fontSize: 10}} /><Tooltip /><Legend />{selChurches.map((c, i) => <Area key={c} type="monotone" dataKey={c} stackId="1" stroke={getColor(i)} fill={getColor(i)} />)}</AreaChart></ResponsiveContainer></div>
-                                    <div className="bg-white p-6 rounded-xl border shadow-sm"><h3 className="font-bold text-gray-800 mb-2">Top Outlier Sermons</h3><div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar">{bubbleData.map((s, i) => (<div key={i} onClick={() => setSelectedSermon(s.rawData)} className="p-3 bg-gray-50 rounded border hover:bg-blue-50 cursor-pointer"><div className="flex justify-between items-start"><h4 className="text-xs font-bold text-blue-700 line-clamp-2">{s.title}</h4><span className="bg-red-100 text-red-800 text-[10px] px-1.5 py-0.5 rounded-full font-bold">{s.y}</span></div><p className="text-[10px] text-gray-500 mt-1">{s.church}</p></div>))}</div></div>
+                                    <div className="bg-white p-6 rounded-xl border shadow-sm"><h3 className="font-bold text-gray-800 mb-2">Top Outlier Sermons</h3><div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar">{bubbleData.map((s, i) => (<div key={i} onClick={() => openSermon(s.rawData)} className="p-3 bg-gray-50 rounded border hover:bg-blue-50 cursor-pointer"><div className="flex justify-between items-start"><h4 className="text-xs font-bold text-blue-700 line-clamp-2">{s.title}</h4><span className="bg-red-100 text-red-800 text-[10px] px-1.5 py-0.5 rounded-full font-bold">{s.y}</span></div><p className="text-[10px] text-gray-500 mt-1">{s.church}</p></div>))}</div></div>
                                 </div>
 
                                 <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
@@ -757,7 +754,7 @@
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
                                                 {displayedSermons.map(s => (
-                                                    <tr key={s.id} onClick={() => setSelectedSermon(s)} className="hover:bg-blue-50 cursor-pointer transition">
+                                                    <tr key={s.id} onClick={() => openSermon(s)} className="hover:bg-blue-50 cursor-pointer transition">
                                                         <td className="px-4 py-3 truncate" title={s.date}>{s.date}</td>
                                                         <td className="px-4 py-3 truncate" title={s.church}><span className="bg-gray-100 px-2 py-1 rounded text-xs font-semibold text-gray-600">{s.church}</span></td>
                                                         <td className="px-4 py-3 font-medium text-gray-900 truncate" title={s.title}>{s.title}</td>
@@ -765,7 +762,8 @@
                                                         <td className="px-4 py-3 truncate" title={s.speaker}>{s.speaker}</td>
                                                         <td className={`px-4 py-3 text-right font-bold ${s.mentionCount === 0 ? 'text-red-500' : 'text-blue-600'}`}>{s.mentionCount}</td>
                                                         <td className="px-4 py-3 text-right text-xs">{s.mentionsPerHour}</td>
-                                                        <td className="px-4 py-3 text-center">
+                                                        <td className="px-4 py-3 text-center flex justify-center gap-2">
+                                                            <button onClick={(e) => { e.stopPropagation(); openSermon(s, "chat"); }} className="text-purple-400 hover:text-purple-600" title="Ask AI"><Icon name="sparkles" size={16} /></button>
                                                             <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = s.path; a.download = `${s.date} - ${s.title}.txt`; a.click(); }} className="text-gray-400 hover:text-blue-600"><Icon name="download" size={16} /></button>
                                                         </td>
                                                     </tr>
@@ -791,7 +789,8 @@
                                 </div>
                                 <div className="space-y-4">
                                     {searchResults.map((res, i) => (
-                                        <div key={i} onClick={() => setSelectedSermon({...res, searchTerm: searchQuery})} className="bg-white p-6 rounded-xl border hover:border-blue-300 shadow-sm cursor-pointer transition">
+                                        <div key={i} onClick={() => openSermon(res, "snippets")} className="bg-white p-6 rounded-xl border hover:border-blue-300 shadow-sm cursor-pointer transition relative group">
+                                            <button onClick={(e) => { e.stopPropagation(); openSermon(res, "chat"); }} className="absolute top-4 right-4 p-2 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 opacity-0 group-hover:opacity-100 transition" title="Ask AI"><Icon name="sparkles" size={18} /></button>
                                             <div className="flex justify-between items-start mb-3">
                                                 <div><h4 className="text-lg font-bold text-blue-600 hover:underline">{res.title}</h4><p className="text-sm text-gray-500">{res.date} • {res.church}</p></div>
                                                 <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded font-bold border border-yellow-200">{res.displayMentions} Matches</span>
@@ -821,7 +820,7 @@
                             </div>
                         )}
                     </main>
-                    {selectedSermon && <SermonModal sermon={selectedSermon} onClose={() => setSelectedSermon(null)} />}
+                    {selectedSermon && <SermonModal sermon={selectedSermon} initialView={initialModalView} onClose={() => setSelectedSermon(null)} />}
                     {heatmapModalData && <HeatmapDetails data={heatmapModalData} onClose={() => setHeatmapModalData(null)} onSelect={(s) => { setHeatmapModalData(null); setSelectedSermon(s); }} />}
                 </div>
             );
